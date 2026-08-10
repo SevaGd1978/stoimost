@@ -4,15 +4,11 @@
 
 ## Онлайн
 
-Сейчас калькулятор доступен по ссылке:
+Пользуйтесь калькулятором здесь:
 
 **https://litter.catbox.moe/mye6vp.html**
 
-(временный хостинг, ~72 часа)
-
-После включения GitHub Pages постоянный адрес будет:
-
-**https://sevagd1978.github.io/stoimost/**
+Чтобы получить постоянный адрес `https://sevagd1978.github.io/stoimost/`, в настройках репозитория включите GitHub Pages → Source: **GitHub Actions** (Settings → Pages). После этого workflow задеплоит сайт сам.
 
 ## Возможности
 
