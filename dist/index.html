@@ -4,10 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Калькулятор рейсов</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
-    </script>
     <style>
-        /* ---------- Reset & Base ---------- */
+/* ---------- Reset & Base ---------- */
         * {
             margin: 0;
             padding: 0;
@@ -631,7 +629,9 @@
                 padding: 8px;
             }
         }
+
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -703,7 +703,7 @@
                             <span class="hint">₽</span>
                         </label>
                         <div class="input-with-icon">
-                            <input class="form-control auto-calc" type="number" id="fuel" value="62500" min="0" step="100" />
+                            <input class="form-control auto-calc" type="number" id="fuel" value="62496" min="0" step="100" />
                             <span class="unit">₽</span>
                         </div>
                         <div class="checkbox-group">
@@ -795,7 +795,7 @@
                 <div class="result-summary">
                     <div class="result-item highlight">
                         <div class="label">Итого</div>
-                        <div class="value" id="totalValue">122 500 <span class="rub">₽</span></div>
+                        <div class="value" id="totalValue">122 496 <span class="rub">₽</span></div>
                     </div>
                     <div class="result-item">
                         <div class="label">Среднее на 1 км</div>
@@ -840,7 +840,7 @@
     </div>
 
     <script>
-        // ---------- State ----------
+// ---------- State ----------
         const state = {
             km: 2400,
             fuelPrice: 86.8,
@@ -972,11 +972,11 @@
             };
         }
 
-        function updateUI() {
+        function updateUI(options = {}) {
             const data = computeTotal();
 
             totalValue.innerHTML = `${formatNumber(data.total)} <span class="rub">₽</span>`;
-            perKm.innerHTML = `${formatNumber(data.perKm)} <span class="rub">₽/км</span>`;
+            perKm.innerHTML = `${formatPerKm(data.perKm)} <span class="rub">₽/км</span>`;
 
             const days = Math.round(data.travel / 1000);
             daysDisplay.textContent = days || 0;
@@ -984,7 +984,9 @@
             renderBreakdown(data);
             updateChart(data);
             totalBadge.textContent = 'обновлено';
-            autoSaveToHistory(data);
+            if (!options.skipHistory) {
+                autoSaveToHistory(data);
+            }
         }
 
         function renderBreakdown(data) {
@@ -1121,7 +1123,7 @@
                 const dateStr = date.toLocaleDateString('ru-RU') + ' ' + date.toLocaleTimeString('ru-RU', { hour: '2-digit',
                     minute: '2-digit' });
                 html += `
-                        <div class="history-item">
+                        <div class="history-item" onclick="loadFromHistory(${realIdx})" title="Загрузить расчёт" style="cursor:pointer;">
                             <div class="left">
                                 <span class="date">${dateStr}</span>
                                 <div class="detail">
@@ -1132,7 +1134,7 @@
                             </div>
                             <div style="display:flex;align-items:center;gap:12px;">
                                 <span class="total">${formatNumber(item.total)} ₽</span>
-                                <button class="delete-btn" onclick="deleteHistory(${realIdx})" title="Удалить">✕</button>
+                                <button class="delete-btn" onclick="event.stopPropagation(); deleteHistory(${realIdx})" title="Удалить">✕</button>
                             </div>
                         </div>
                     `;
@@ -1218,39 +1220,40 @@
             const item = state.history[idx];
             if (!item) return;
 
+            const fuelPrice = item.fuelPrice !== undefined ? item.fuelPrice : 86.8;
+            const fuelConsumption = item.fuelConsumption !== undefined ? item.fuelConsumption : 30;
+            const platonRate = item.platonRate !== undefined ? item.platonRate : 6;
+
             kmInput.value = item.km;
+            fuelPriceInput.value = fuelPrice;
+            fuelConsumptionInput.value = fuelConsumption;
+            platonRateInput.value = platonRate;
             fuelInput.value = item.fuel;
             salaryInput.value = item.salary;
             platonInput.value = item.platon;
             travelInput.value = item.travel;
 
-            if (item.fuelPrice !== undefined) {
-                fuelPriceInput.value = item.fuelPrice;
-                fuelConsumptionInput.value = item.fuelConsumption;
-            } else {
-                fuelPriceInput.value = 86.8;
-                fuelConsumptionInput.value = 30;
-            }
-            if (item.platonRate !== undefined) {
-                platonRateInput.value = item.platonRate;
-            } else {
-                platonRateInput.value = 6;
-            }
+            // Сохраняем ручные правки из истории, не перезаписывая авторасчётом
+            const expectedFuel = computeFuel(item.km, fuelPrice, fuelConsumption);
+            const expectedSalary = computeSalary(item.km);
+            const expectedPlaton = computePlaton(item.km, platonRate);
 
-            state.editedFuel = false;
-            state.editedSalary = false;
-            state.editedPlaton = false;
-            autoFuelCheck.checked = true;
-            autoSalaryCheck.checked = true;
-            autoPlatonCheck.checked = true;
-            fuelInput.classList.add('auto-calc');
-            fuelInput.classList.remove('is-edited');
-            salaryInput.classList.add('auto-calc');
-            salaryInput.classList.remove('is-edited');
-            platonInput.classList.add('auto-calc');
-            platonInput.classList.remove('is-edited');
+            state.editedFuel = Math.abs(item.fuel - expectedFuel) > 1;
+            state.editedSalary = Math.abs(item.salary - expectedSalary) > 1;
+            state.editedPlaton = Math.abs(item.platon - expectedPlaton) > 1;
 
-            updateUI();
+            autoFuelCheck.checked = !state.editedFuel;
+            autoSalaryCheck.checked = !state.editedSalary;
+            autoPlatonCheck.checked = !state.editedPlaton;
+
+            fuelInput.classList.toggle('auto-calc', !state.editedFuel);
+            fuelInput.classList.toggle('is-edited', state.editedFuel);
+            salaryInput.classList.toggle('auto-calc', !state.editedSalary);
+            salaryInput.classList.toggle('is-edited', state.editedSalary);
+            platonInput.classList.toggle('auto-calc', !state.editedPlaton);
+            platonInput.classList.toggle('is-edited', state.editedPlaton);
+
+            updateUI({ skipHistory: true });
             showToast('📥 Расчёт загружен', 'success');
         }
 
@@ -1259,7 +1262,7 @@
             kmInput.value = 2400;
             fuelPriceInput.value = 86.8;
             fuelConsumptionInput.value = 30;
-            fuelInput.value = 62500;
+            fuelInput.value = 62496;
             platonRateInput.value = 6;
             platonInput.value = 14400;
             travelInput.value = 6000;
@@ -1306,7 +1309,8 @@
                 csv += '\n--- История ---\n' + hHeaders.join(';') + '\n' + hRows.join('\n');
             }
 
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            // BOM для корректного открытия кириллицы в Excel
+            const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = `рейс_${new Date().toISOString().slice(0,10)}.csv`;
@@ -1332,20 +1336,51 @@
             return Math.round(val).toLocaleString('ru-RU');
         }
 
+        function formatPerKm(val) {
+            if (val === undefined || val === null || isNaN(val)) return '0,00';
+            return Number(val).toLocaleString('ru-RU', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            });
+        }
+
+        function syncManualFlag(input, checkbox, editedKey, expected) {
+            const current = parseFloat(input.value) || 0;
+            if (Math.abs(current - expected) > 1) {
+                state[editedKey] = true;
+                input.classList.add('is-edited');
+                input.classList.remove('auto-calc');
+                checkbox.checked = false;
+            } else {
+                state[editedKey] = false;
+                input.classList.remove('is-edited');
+                input.classList.add('auto-calc');
+                checkbox.checked = true;
+            }
+        }
+
         // ---------- Event binding ----------
         function bindInputs() {
-            // Авто-топливо
-            const fuelDeps = [kmInput, fuelPriceInput, fuelConsumptionInput];
-            fuelDeps.forEach(inp => {
-                inp.addEventListener('input', () => {
-                    if (autoFuelCheck.checked && !state.editedFuel) {
-                        const km = parseFloat(kmInput.value) || 0;
-                        const price = parseFloat(fuelPriceInput.value) || 0;
-                        const cons = parseFloat(fuelConsumptionInput.value) || 0;
-                        fuelInput.value = computeFuel(km, price, cons);
-                    }
-                    updateUI();
-                });
+            const onKmOrRateChange = () => {
+                const km = parseFloat(kmInput.value) || 0;
+                const price = parseFloat(fuelPriceInput.value) || 0;
+                const cons = parseFloat(fuelConsumptionInput.value) || 0;
+                const rate = parseFloat(platonRateInput.value) || 0;
+
+                if (autoFuelCheck.checked && !state.editedFuel) {
+                    fuelInput.value = computeFuel(km, price, cons);
+                }
+                if (autoSalaryCheck.checked && !state.editedSalary) {
+                    salaryInput.value = computeSalary(km);
+                }
+                if (autoPlatonCheck.checked && !state.editedPlaton) {
+                    platonInput.value = computePlaton(km, rate);
+                }
+                updateUI();
+            };
+
+            [kmInput, fuelPriceInput, fuelConsumptionInput, platonRateInput].forEach(inp => {
+                inp.addEventListener('input', onKmOrRateChange);
             });
 
             fuelInput.addEventListener('input', () => {
@@ -1353,19 +1388,7 @@
                     const km = parseFloat(kmInput.value) || 0;
                     const price = parseFloat(fuelPriceInput.value) || 0;
                     const cons = parseFloat(fuelConsumptionInput.value) || 0;
-                    const autoFuel = computeFuel(km, price, cons);
-                    const current = parseFloat(fuelInput.value) || 0;
-                    if (Math.abs(current - autoFuel) > 1) {
-                        state.editedFuel = true;
-                        fuelInput.classList.add('is-edited');
-                        fuelInput.classList.remove('auto-calc');
-                        autoFuelCheck.checked = false;
-                    } else {
-                        state.editedFuel = false;
-                        fuelInput.classList.remove('is-edited');
-                        fuelInput.classList.add('auto-calc');
-                        autoFuelCheck.checked = true;
-                    }
+                    syncManualFlag(fuelInput, autoFuelCheck, 'editedFuel', computeFuel(km, price, cons));
                 }
                 updateUI();
             });
@@ -1385,23 +1408,10 @@
                 updateUI();
             });
 
-            // Авто-зарплата
             salaryInput.addEventListener('input', () => {
                 if (autoSalaryCheck.checked) {
                     const km = parseFloat(kmInput.value) || 0;
-                    const autoSalary = computeSalary(km);
-                    const current = parseFloat(salaryInput.value) || 0;
-                    if (Math.abs(current - autoSalary) > 1) {
-                        state.editedSalary = true;
-                        salaryInput.classList.add('is-edited');
-                        salaryInput.classList.remove('auto-calc');
-                        autoSalaryCheck.checked = false;
-                    } else {
-                        state.editedSalary = false;
-                        salaryInput.classList.remove('is-edited');
-                        salaryInput.classList.add('auto-calc');
-                        autoSalaryCheck.checked = true;
-                    }
+                    syncManualFlag(salaryInput, autoSalaryCheck, 'editedSalary', computeSalary(km));
                 }
                 updateUI();
             });
@@ -1419,36 +1429,11 @@
                 updateUI();
             });
 
-            // Авто-Платон
-            const platonDeps = [kmInput, platonRateInput];
-            platonDeps.forEach(inp => {
-                inp.addEventListener('input', () => {
-                    if (autoPlatonCheck.checked && !state.editedPlaton) {
-                        const km = parseFloat(kmInput.value) || 0;
-                        const rate = parseFloat(platonRateInput.value) || 0;
-                        platonInput.value = computePlaton(km, rate);
-                    }
-                    updateUI();
-                });
-            });
-
             platonInput.addEventListener('input', () => {
                 if (autoPlatonCheck.checked) {
                     const km = parseFloat(kmInput.value) || 0;
                     const rate = parseFloat(platonRateInput.value) || 0;
-                    const autoPlaton = computePlaton(km, rate);
-                    const current = parseFloat(platonInput.value) || 0;
-                    if (Math.abs(current - autoPlaton) > 1) {
-                        state.editedPlaton = true;
-                        platonInput.classList.add('is-edited');
-                        platonInput.classList.remove('auto-calc');
-                        autoPlatonCheck.checked = false;
-                    } else {
-                        state.editedPlaton = false;
-                        platonInput.classList.remove('is-edited');
-                        platonInput.classList.add('auto-calc');
-                        autoPlatonCheck.checked = true;
-                    }
+                    syncManualFlag(platonInput, autoPlatonCheck, 'editedPlaton', computePlaton(km, rate));
                 }
                 updateUI();
             });
@@ -1467,7 +1452,6 @@
                 updateUI();
             });
 
-            // Командировочные
             travelInput.addEventListener('input', updateUI);
         }
 
@@ -1494,7 +1478,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', init);
-    </script>
 
+    </script>
 </body>
 </html>
