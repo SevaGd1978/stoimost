@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Калькулятор рейсов</title>
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+    <div class="app" id="app">
+
+        <!-- Toast -->
+        <div class="toast" id="toast"></div>
+
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="icon">🚛</div>
+                <div>
+                    <h1>Калькулятор <span>рейса</span></h1>
+                    <div class="header-sub">Расчёт затрат на основе пробега и расходов</div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn btn-outline" onclick="resetToDefaults()">↺ Сбросить</button>
+                <button class="btn btn-success" onclick="saveCalculation()">💾 Сохранить</button>
+                <button class="btn btn-outline" onclick="window.print()">🖨️ Печать</button>
+                <button class="btn btn-outline" onclick="exportCSV()">📤 CSV</button>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="grid">
+
+            <!-- LEFT: Inputs -->
+            <div class="card">
+                <div class="card-title">
+                    📋 Ввод данных
+                    <span class="badge">все суммы в ₽</span>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        Километраж
+                        <span class="hint">км</span>
+                    </label>
+                    <div class="input-with-icon">
+                        <input class="form-control" type="number" id="km" value="2400" min="0" step="10" />
+                        <span class="unit">км</span>
+                    </div>
+                </div>
+
+                <!-- Блок: Топливо -->
+                <div class="form-group" style="border-top:1px dashed #dce3ec; padding-top:12px; margin-top:6px;">
+                    <label style="font-weight:600; color:#1e3a5f;">⛽ Топливо</label>
+                    <div class="form-row">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Цена за литр <span class="hint">₽</span></label>
+                            <div class="input-with-icon">
+                                <input class="form-control" type="number" id="fuelPrice" value="86.8" min="0" step="0.1" />
+                                <span class="unit">₽/л</span>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Расход <span class="hint">л/100км</span></label>
+                            <div class="input-with-icon">
+                                <input class="form-control" type="number" id="fuelConsumption" value="30" min="0" step="0.1" />
+                                <span class="unit">л/100км</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px;">
+                        <label style="font-weight:500;">
+                            Стоимость топлива
+                            <span class="hint">₽</span>
+                        </label>
+                        <div class="input-with-icon">
+                            <input class="form-control auto-calc" type="number" id="fuel" value="62500" min="0" step="100" />
+                            <span class="unit">₽</span>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="autoFuel" checked />
+                            <label for="autoFuel">Автоматически рассчитывать от цены и расхода</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Блок: Зарплата -->
+                <div class="form-group">
+                    <label>
+                        Зарплата (с налогами)
+                        <span class="hint">₽ · авторасчёт: км × 16,5</span>
+                    </label>
+                    <div class="input-with-icon">
+                        <input class="form-control auto-calc" type="number" id="salary" value="39600" min="0" step="100" />
+                        <span class="unit">₽</span>
+                    </div>
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="autoSalary" checked />
+                        <label for="autoSalary">Автоматически пересчитывать при изменении километража</label>
+                    </div>
+                </div>
+
+                <!-- Блок: Платон (новый с авторасчётом) -->
+                <div class="form-group" style="border-top:1px dashed #dce3ec; padding-top:12px; margin-top:6px;">
+                    <label style="font-weight:600; color:#1e3a5f;">🛣️ Платон</label>
+                    <div class="form-row">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>Ставка <span class="hint">₽/км</span></label>
+                            <div class="input-with-icon">
+                                <input class="form-control" type="number" id="platonRate" value="6" min="0" step="0.1" />
+                                <span class="unit">₽/км</span>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label>&nbsp;</label>
+                            <div style="padding-top:4px; font-size:13px; color:#64748b;">
+                                авторасчёт: км × ставка
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px;">
+                        <label style="font-weight:500;">
+                            Сумма Платона
+                            <span class="hint">₽</span>
+                        </label>
+                        <div class="input-with-icon">
+                            <input class="form-control auto-calc" type="number" id="platon" value="14400" min="0" step="100" />
+                            <span class="unit">₽</span>
+                        </div>
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="autoPlaton" checked />
+                            <label for="autoPlaton">Автоматически рассчитывать от километража и ставки</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Командировочные -->
+                <div class="form-group">
+                    <label>
+                        Командировочные
+                        <span class="hint">₽</span>
+                    </label>
+                    <div class="input-with-icon">
+                        <input class="form-control" type="number" id="travel" value="6000" min="0" step="100" />
+                        <span class="unit">₽</span>
+                    </div>
+                    <div style="font-size:12px;color:#94a3b8;margin-top:3px;">
+                        1000 ₽/сут · <span id="daysDisplay">6</span> сут
+                    </div>
+                </div>
+
+                <div style="margin-top:16px;padding-top:16px;border-top:1px solid #e9edf3;">
+                    <button class="btn btn-primary" onclick="saveCalculation()" style="width:100%;justify-content:center;padding:12px;">
+                        💾 Сохранить расчёт
+                    </button>
+                </div>
+            </div>
+
+            <!-- RIGHT: Results & Chart -->
+            <div class="card">
+                <div class="card-title">
+                    📊 Итоги рейса
+                    <span class="badge" id="totalBadge">обновлено</span>
+                </div>
+
+                <div class="result-summary">
+                    <div class="result-item highlight">
+                        <div class="label">Итого</div>
+                        <div class="value" id="totalValue">122 500 <span class="rub">₽</span></div>
+                    </div>
+                    <div class="result-item">
+                        <div class="label">Среднее на 1 км</div>
+                        <div class="value" id="perKm">51,04 <span class="rub">₽/км</span></div>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div class="chart-wrapper">
+                    <div class="chart-container">
+                        <canvas id="costChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Breakdown -->
+                <div class="breakdown" id="breakdownContainer">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- History -->
+        <section class="history-section">
+            <div class="history-header">
+                <h3>
+                    📂 История расчётов
+                    <span class="count" id="historyCount">0</span>
+                </h3>
+                <div class="flex gap-8 flex-wrap">
+                    <button class="btn btn-outline" onclick="clearHistory()">🗑️ Очистить</button>
+                    <button class="btn btn-outline" onclick="loadFromHistory(-1)">📥 Загрузить последний</button>
+                </div>
+            </div>
+            <div class="history-list" id="historyList">
+                <div class="history-empty">Нет сохранённых расчётов</div>
+            </div>
+        </section>
+
+        <footer style="margin-top:24px;font-size:13px;color:#94a3b8;text-align:center;border-top:1px solid #eef2f6;padding-top:18px;">
+            Данные сохраняются в браузере (localStorage) · Автосохранение при изменении
+        </footer>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
