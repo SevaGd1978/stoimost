@@ -1,0 +1,452 @@
+/* Tender Spy — клиент. Ванильный JS, без сборки. */
+(() => {
+  'use strict';
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  const state = {
+    mode: 'live',
+    settings: null,
+    watchlist: { companies: [], nomenclature: [] },
+    status: null,
+    stats: null,
+    tenders: [],
+    browserNotify: localStorage.getItem('ts.browserNotify') === '1',
+  };
+
+  // ---------- helpers ----------
+  const fmtPrice = (n) => (n == null ? '—' : Math.round(n).toLocaleString('ru-RU'));
+  const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '—');
+  const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  function toast(msg, type = '') {
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    $('#toasts').appendChild(el);
+    setTimeout(() => el.remove(), 4200);
+  }
+
+  async function api(url, opts = {}) {
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+      body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  function daysLeft(iso) {
+    if (!iso) return null;
+    return Math.ceil((Date.parse(iso) - Date.now()) / 86400000);
+  }
+
+  // ---------- навигация ----------
+  function showView(name) {
+    $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
+    $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+    if (name === 'watchlist') loadQueries();
+    if (name === 'log') loadRuns();
+    location.hash = name;
+  }
+  $$('.nav-item').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+
+  // ---------- state ----------
+  async function loadState() {
+    const s = await api('/api/state');
+    Object.assign(state, { mode: s.mode, settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun });
+    renderStatus();
+    renderWatchlist();
+    renderSettings();
+    fillFilterSelects();
+  }
+
+  function renderStatus() {
+    const { status, stats, mode } = state;
+    $('#st-mode').textContent = mode === 'demo' ? 'демо (без сети)' : 'ЕИС (live)';
+    $('#st-last').textContent = state.lastRun ? fmtDateTime(state.lastRun.finishedAt) : '—';
+    $('#st-next').textContent = status?.nextRunAt ? fmtDateTime(status.nextRunAt) : '—';
+    $('#st-tg').textContent = status?.telegram ? (state.settings?.notifyTelegram ? 'вкл' : 'настроен, выкл') : 'не настроен';
+    $('#s-open').textContent = stats?.open ?? 0;
+    $('#s-unseen').textContent = stats?.unseen ?? 0;
+    $('#s-contracts').textContent = stats?.contracts ?? 0;
+    $('#s-fav').textContent = stats?.favorites ?? 0;
+    const badge = $('#badge-unseen');
+    badge.hidden = !(stats?.unseen > 0);
+    badge.textContent = stats?.unseen ?? 0;
+    document.title = (stats?.unseen ? `(${stats.unseen}) ` : '') + 'Tender Spy';
+    $('#scan-progress').hidden = !status?.running;
+    $('#btn-scan').disabled = Boolean(status?.running);
+    $('#source-note').textContent =
+      mode === 'demo'
+        ? 'Сервер запущен в демо-режиме: карточки сгенерированы локально и лишь имитируют выдачу ЕИС. Запустите без флага --demo для реальных данных.'
+        : 'Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru): извещения по ИНН заказчика и ключевым словам/ОКПД2, реестр контрактов по ИНН поставщика. Участники открытой закупки становятся видны только после публикации протоколов — это ограничение ЕИС.';
+  }
+
+  // ---------- лента ----------
+  function filterParams() {
+    const p = new URLSearchParams();
+    const q = $('#f-q').value.trim();
+    if (q) p.set('q', q);
+    const company = $('#f-company').value;
+    if (company) p.set('company', company);
+    const nomen = $('#f-nomen').value;
+    if (nomen) p.set('nomen', nomen);
+    p.set('kind', $('#f-kind').value);
+    p.set('law', $('#f-law').value);
+    p.set('sort', $('#f-sort').value);
+    if ($('#f-new').checked) p.set('onlyNew', '1');
+    if ($('#f-open').checked) p.set('onlyOpen', '1');
+    if ($('#f-fav').checked) p.set('favorite', '1');
+    if ($('#f-arch').checked) p.set('archived', '1');
+    return p;
+  }
+
+  async function loadFeed() {
+    const p = filterParams();
+    const data = await api(`/api/tenders?${p}`);
+    state.tenders = data.items;
+    $('#btn-csv').href = `/api/tenders.csv?${p}`;
+    $('#feed-summary').textContent = `Показано ${data.items.length} из ${data.total}`;
+    renderFeed();
+  }
+
+  function whyChip(m) {
+    const label = m.type === 'company' ? `ИНН ${m.ref} · ${m.label}${m.via === 'contract' ? ' (контракт)' : ''}` : m.type === 'okpd2' ? `ОКПД2 ${m.ref}` : `«${m.label}»`;
+    return `<span class="why ${m.type === 'company' ? 'company' : ''} ${m.strong === false ? 'weak' : ''}" title="${m.strong === false ? 'Совпадение по выдаче ЕИС, в тексте карточки не подтверждено' : 'Подтверждено в тексте карточки'}">${esc(label)}</span>`;
+  }
+
+  function renderTender(t) {
+    const left = daysLeft(t.deadlineAt);
+    const dlClass = left == null ? '' : left < 0 ? 'over' : left <= 3 ? 'soon' : '';
+    const dlText = t.deadlineAt ? (t.kind === 'contract' ? `исполнение до ${fmtDate(t.deadlineAt)}` : left < 0 ? `подача завершена ${fmtDate(t.deadlineAt)}` : `подача до ${fmtDate(t.deadlineAt)} (${left} дн.)`) : '';
+    return `
+      <article class="tender ${t.seen ? '' : 'unseen'} ${t.archived ? 'archived' : ''}" data-id="${esc(t.id)}">
+        <div>
+          <div class="tender-top">
+            ${t.seen ? '' : '<span class="tag new">новое</span>'}
+            <span class="tag kind-${t.kind}">${t.kind === 'contract' ? 'контракт' : 'извещение'}</span>
+            ${t.law !== 'other' ? `<span class="tag law-${t.law}">${t.law}-${t.law === '615' ? 'ПП' : 'ФЗ'}</span>` : ''}
+            <span class="tag ${t.isOpen ? 'stage-open' : 'stage-closed'}">${esc(t.stage || '')}</span>
+            <span>№ ${esc(t.number)}</span>
+            ${t.method ? `<span>· ${esc(t.method)}</span>` : ''}
+            <span>· размещено ${fmtDate(t.publishedAt)}</span>
+          </div>
+          <div class="tender-title"><a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title)}</a></div>
+          <div class="tender-meta">
+            ${t.customer ? `<span>Заказчик: <b>${esc(t.customer)}</b></span>` : ''}
+            ${t.supplier ? `<span>Поставщик: <b>${esc(t.supplier)}</b></span>` : ''}
+            ${t.region ? `<span>${esc(t.region)}</span>` : ''}
+          </div>
+          <div class="tender-why">${t.matches.map(whyChip).join('')}</div>
+        </div>
+        <div class="tender-right">
+          <div class="price">${fmtPrice(t.price)} <small>₽</small></div>
+          <div class="deadline ${dlClass}">${esc(dlText)}</div>
+          <div class="tender-actions">
+            <button class="btn btn-sm btn-icon fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="В избранное">★</button>
+            <button class="btn btn-sm btn-icon" data-act="seen" title="${t.seen ? 'Отметить как новое' : 'Прочитано'}">${t.seen ? '↺' : '✓'}</button>
+            <button class="btn btn-sm btn-icon" data-act="archive" title="${t.archived ? 'Вернуть из архива' : 'В архив'}">${t.archived ? '📤' : '🗄️'}</button>
+          </div>
+        </div>
+      </article>`;
+  }
+
+  function renderFeed() {
+    const list = $('#feed-list');
+    list.innerHTML = state.tenders.map(renderTender).join('');
+    $('#feed-empty').hidden = state.tenders.length > 0;
+  }
+
+  $('#feed-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const card = btn.closest('.tender');
+    const t = state.tenders.find((x) => x.id === card.dataset.id);
+    if (!t) return;
+    const patch =
+      btn.dataset.act === 'favorite' ? { favorite: !t.favorite } : btn.dataset.act === 'seen' ? { seen: !t.seen } : { archived: !t.archived, seen: true };
+    try {
+      await api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: patch });
+      await Promise.all([loadFeed(), loadState()]);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  // клик по ссылке — считаем прочитанным
+  $('#feed-list').addEventListener('click', (e) => {
+    const a = e.target.closest('.tender-title a');
+    if (!a) return;
+    const card = a.closest('.tender');
+    const t = state.tenders.find((x) => x.id === card.dataset.id);
+    if (t && !t.seen) api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { seen: true } }).then(() => Promise.all([loadFeed(), loadState()]));
+  });
+
+  let feedTimer;
+  const debouncedFeed = () => {
+    clearTimeout(feedTimer);
+    feedTimer = setTimeout(() => loadFeed().catch((e) => toast(e.message, 'err')), 200);
+  };
+  ['#f-q'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
+  ['#f-company', '#f-nomen', '#f-kind', '#f-law', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch'].forEach((s) => $(s).addEventListener('change', debouncedFeed));
+
+  $('#btn-mark-seen').addEventListener('click', async () => {
+    const r = await api('/api/tenders/mark-all-seen', { method: 'POST' });
+    toast(`Отмечено прочитанными: ${r.marked}`, 'ok');
+    await Promise.all([loadFeed(), loadState()]);
+  });
+
+  function fillFilterSelects() {
+    const cs = $('#f-company');
+    const cur = cs.value;
+    cs.innerHTML = '<option value="">Все предприятия</option>' + state.watchlist.companies.map((c) => `<option value="${esc(c.inn)}">${esc(c.name)} · ${esc(c.inn)}</option>`).join('');
+    cs.value = cur;
+    const ns = $('#f-nomen');
+    const curN = ns.value;
+    ns.innerHTML = '<option value="">Вся номенклатура</option>' + state.watchlist.nomenclature.map((n) => `<option value="${esc(n.keyword || n.okpd2)}">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</option>`).join('');
+    ns.value = curN;
+  }
+
+  // ---------- наблюдение ----------
+  function renderWatchlist() {
+    const roleName = { any: 'заказчик + поставщик', customer: 'заказчик', supplier: 'поставщик' };
+    $('#company-list').innerHTML =
+      state.watchlist.companies
+        .map(
+          (c) => `
+        <div class="item" data-id="${esc(c.id)}">
+          <div class="item-main">
+            <div class="item-title">${esc(c.name)} <span class="role">${roleName[c.role] || c.role}</span></div>
+            <div class="item-sub">ИНН <code>${esc(c.inn)}</code>${c.note ? ` · ${esc(c.note)}` : ''}</div>
+          </div>
+          <button class="btn btn-sm" data-act="feed" title="Показать в ленте">📡</button>
+          <button class="btn btn-sm btn-danger" data-act="del" title="Удалить">✕</button>
+        </div>`,
+        )
+        .join('') || '<div class="muted small">Пока ни одного предприятия. Добавьте ИНН выше.</div>';
+
+    $('#nomen-list').innerHTML =
+      state.watchlist.nomenclature
+        .map(
+          (n) => `
+        <div class="item" data-id="${esc(n.id)}">
+          <div class="item-main">
+            <div class="item-title">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</div>
+            <div class="item-sub">${n.okpd2 ? `ОКПД2 <code>${esc(n.okpd2)}</code>` : 'полнотекстовый поиск'}</div>
+          </div>
+          <button class="btn btn-sm" data-act="feed" title="Показать в ленте">📡</button>
+          <button class="btn btn-sm btn-danger" data-act="del" title="Удалить">✕</button>
+        </div>`,
+        )
+        .join('') || '<div class="muted small">Добавьте ключевые слова или ОКПД2.</div>';
+  }
+
+  $('#form-company').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const c = await api('/api/companies', { method: 'POST', body: Object.fromEntries(fd) });
+      toast(`Добавлено: ${c.name}`, 'ok');
+      e.target.reset();
+      await loadState();
+      loadQueries();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#form-nomen').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const n = await api('/api/nomenclature', { method: 'POST', body: Object.fromEntries(fd) });
+      toast(`Добавлено: ${n.keyword || `ОКПД2 ${n.okpd2}`}`, 'ok');
+      e.target.reset();
+      await loadState();
+      loadQueries();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#company-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const item = btn.closest('.item');
+    const c = state.watchlist.companies.find((x) => x.id === item.dataset.id);
+    if (btn.dataset.act === 'del') {
+      if (!confirm(`Удалить ${c.name} из наблюдения?`)) return;
+      await api(`/api/companies/${c.id}`, { method: 'DELETE' });
+      await loadState();
+      loadQueries();
+    } else {
+      $('#f-company').value = c.inn;
+      showView('feed');
+      loadFeed();
+    }
+  });
+
+  $('#nomen-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const item = btn.closest('.item');
+    const n = state.watchlist.nomenclature.find((x) => x.id === item.dataset.id);
+    if (btn.dataset.act === 'del') {
+      await api(`/api/nomenclature/${n.id}`, { method: 'DELETE' });
+      await loadState();
+      loadQueries();
+    } else {
+      $('#f-nomen').value = n.keyword || n.okpd2;
+      showView('feed');
+      loadFeed();
+    }
+  });
+
+  async function loadQueries() {
+    const qs = await api('/api/queries').catch(() => []);
+    $('#queries-preview').innerHTML = qs.length
+      ? qs.map((q) => `<div><b>${esc(q.label)}</b>${esc(q.url)}</div>`).join('')
+      : '<div>Список наблюдения пуст — запросов нет.</div>';
+  }
+
+  // ---------- настройки ----------
+  function renderSettings() {
+    const s = state.settings;
+    if (!s) return;
+    $('#set-interval').value = s.pollIntervalMin;
+    $('#set-onlyopen').checked = s.onlyOpen;
+    $('#set-contracts').checked = s.searchContracts;
+    $('#set-fz44').checked = s.laws.fz44;
+    $('#set-fz223').checked = s.laws.fz223;
+    $('#set-fz615').checked = s.laws.fz615;
+    $('#set-telegram').checked = s.notifyTelegram;
+    $('#set-telegram').disabled = !state.status?.telegram;
+    $('#tg-hint').textContent = state.status?.telegram ? '' : '(токен не задан)';
+    $('#set-browser').checked = state.browserNotify;
+  }
+
+  $('#btn-save-settings').addEventListener('click', async () => {
+    try {
+      await api('/api/settings', {
+        method: 'PATCH',
+        body: {
+          pollIntervalMin: Number($('#set-interval').value),
+          onlyOpen: $('#set-onlyopen').checked,
+          searchContracts: $('#set-contracts').checked,
+          laws: { fz44: $('#set-fz44').checked, fz223: $('#set-fz223').checked, fz615: $('#set-fz615').checked },
+        },
+      });
+      toast('Настройки сохранены', 'ok');
+      await loadState();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#set-telegram').addEventListener('change', async (e) => {
+    await api('/api/settings', { method: 'PATCH', body: { notifyTelegram: e.target.checked } });
+    await loadState();
+  });
+
+  $('#set-browser').addEventListener('change', async (e) => {
+    if (e.target.checked) {
+      if (!('Notification' in window)) {
+        toast('Браузер не поддерживает уведомления', 'err');
+        e.target.checked = false;
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        toast('Разрешение на уведомления не выдано', 'err');
+        e.target.checked = false;
+        return;
+      }
+    }
+    state.browserNotify = e.target.checked;
+    localStorage.setItem('ts.browserNotify', state.browserNotify ? '1' : '0');
+  });
+
+  // ---------- журнал ----------
+  async function loadRuns() {
+    const runs = await api('/api/runs');
+    const tb = $('#runs-table tbody');
+    tb.innerHTML = runs.length
+      ? runs
+          .map(
+            (r) => `<tr>
+          <td>${fmtDateTime(r.startedAt)}</td>
+          <td>${r.trigger === 'timer' ? 'таймер' : 'вручную'}</td>
+          <td>${r.queriesRun}</td>
+          <td>${r.found}</td>
+          <td><b>${r.added}</b></td>
+          <td>${(r.errors || []).map((e) => `<div class="err">${esc(e.query)}: ${esc(e.message)}</div>`).join('') || '—'}</td>
+        </tr>`,
+          )
+          .join('')
+      : '<tr><td colspan="6" class="muted">Опросов ещё не было</td></tr>';
+  }
+
+  // ---------- опрос ----------
+  $('#btn-scan').addEventListener('click', async () => {
+    $('#btn-scan').disabled = true;
+    $('#scan-progress').hidden = false;
+    try {
+      const { run } = await api('/api/scan', { method: 'POST' });
+      if (run.skipped) toast('Опрос уже идёт', '');
+      else if (run.errors?.length && !run.found) toast(`Опрос завершён с ошибками: ${run.errors[0].message}`, 'err');
+      else toast(`Найдено ${run.found}, новых ${run.added}`, run.added ? 'ok' : '');
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      await Promise.all([loadState(), loadFeed()]);
+    }
+  });
+
+  // ---------- SSE ----------
+  function connectEvents() {
+    const es = new EventSource('/api/events');
+    es.addEventListener('run:start', () => {
+      $('#scan-progress').hidden = false;
+      $('#btn-scan').disabled = true;
+    });
+    es.addEventListener('run:done', async (e) => {
+      const { run, added } = JSON.parse(e.data);
+      await Promise.all([loadState(), loadFeed()]);
+      if (added.length && state.browserNotify && Notification.permission === 'granted') {
+        const first = added[0];
+        const n = new Notification(`Tender Spy: ${added.length} новых закупок`, {
+          body: `${first.title}\n${first.customer || ''} · ${fmtPrice(first.price)} ₽`,
+          icon: '/favicon.ico',
+        });
+        n.onclick = () => {
+          window.focus();
+          window.open(first.url, '_blank');
+        };
+      }
+      if (run.trigger === 'timer' && added.length) toast(`Автоопрос: ${added.length} новых закупок`, 'ok');
+    });
+    es.onerror = () => {
+      es.close();
+      setTimeout(connectEvents, 5000);
+    };
+  }
+
+  // ---------- init ----------
+  (async () => {
+    try {
+      await loadState();
+      await loadFeed();
+      connectEvents();
+      const view = location.hash.replace('#', '');
+      if (['feed', 'watchlist', 'settings', 'log'].includes(view)) showView(view);
+      else if (!state.watchlist.companies.length && !state.watchlist.nomenclature.length) showView('watchlist');
+    } catch (err) {
+      toast(`Не удалось загрузить: ${err.message}`, 'err');
+    }
+  })();
+})();

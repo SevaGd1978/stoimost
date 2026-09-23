@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tender Spy — мониторинг тендеров по ИНН и номенклатуре</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🕵️%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="toast-stack" id="toasts"></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">🕵️</div>
+        <div>
+          <div class="brand-title">Tender <span>Spy</span></div>
+          <div class="brand-sub">ЕИС · 44-ФЗ · 223-ФЗ</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="feed">📡 Лента <span class="nav-badge" id="badge-unseen" hidden>0</span></button>
+        <button class="nav-item" data-view="watchlist">🎯 Наблюдение</button>
+        <button class="nav-item" data-view="settings">⚙️ Настройки</button>
+        <button class="nav-item" data-view="log">📜 Журнал опросов</button>
+      </nav>
+
+      <div class="side-card">
+        <div class="side-card-title">Статус</div>
+        <div class="status-row"><span>Режим</span><b id="st-mode">—</b></div>
+        <div class="status-row"><span>Последний опрос</span><b id="st-last">—</b></div>
+        <div class="status-row"><span>Следующий</span><b id="st-next">—</b></div>
+        <div class="status-row"><span>Telegram</span><b id="st-tg">—</b></div>
+        <button class="btn btn-primary btn-block" id="btn-scan">🔄 Опросить сейчас</button>
+        <div class="scan-progress" id="scan-progress" hidden><span class="spinner"></span> Запросы к ЕИС…</div>
+      </div>
+
+      <div class="side-card stats">
+        <div class="stat"><b id="s-open">0</b><span>открытых</span></div>
+        <div class="stat"><b id="s-unseen">0</b><span>новых</span></div>
+        <div class="stat"><b id="s-contracts">0</b><span>контрактов</span></div>
+        <div class="stat"><b id="s-fav">0</b><span>избранных</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ЛЕНТА -->
+      <section class="view" id="view-feed">
+        <header class="view-head">
+          <div>
+            <h1>Лента закупок</h1>
+            <p class="muted" id="feed-summary">Закупки, попавшие под ваши ИНН и номенклатуру</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-mark-seen">✓ Всё прочитано</button>
+            <a class="btn btn-ghost" id="btn-csv" href="/api/tenders.csv" download>📤 CSV</a>
+          </div>
+        </header>
+
+        <div class="filters">
+          <input class="input" id="f-q" type="search" placeholder="Поиск: слово, номер, заказчик…" />
+          <select class="input" id="f-company"><option value="">Все предприятия</option></select>
+          <select class="input" id="f-nomen"><option value="">Вся номенклатура</option></select>
+          <select class="input" id="f-kind">
+            <option value="all">Извещения и контракты</option>
+            <option value="notice">Только извещения</option>
+            <option value="contract">Только контракты</option>
+          </select>
+          <select class="input" id="f-law">
+            <option value="all">44-ФЗ + 223-ФЗ</option>
+            <option value="44">44-ФЗ</option>
+            <option value="223">223-ФЗ</option>
+            <option value="615">615-ПП</option>
+          </select>
+          <select class="input" id="f-sort">
+            <option value="fresh">Сначала новые в ленте</option>
+            <option value="published">По дате размещения</option>
+            <option value="deadline">По сроку подачи</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="price_asc">Цена ↑</option>
+          </select>
+          <label class="chip"><input type="checkbox" id="f-new" /> только новые</label>
+          <label class="chip"><input type="checkbox" id="f-open" checked /> только открытые</label>
+          <label class="chip"><input type="checkbox" id="f-fav" /> ★ избранные</label>
+          <label class="chip"><input type="checkbox" id="f-arch" /> архив</label>
+        </div>
+
+        <div class="list" id="feed-list"></div>
+        <div class="empty" id="feed-empty" hidden>
+          <div class="empty-icon">🔍</div>
+          <h3>Пока пусто</h3>
+          <p>Добавьте ИНН предприятий и номенклатуру в разделе «Наблюдение», затем нажмите «Опросить сейчас».</p>
+        </div>
+      </section>
+
+      <!-- НАБЛЮДЕНИЕ -->
+      <section class="view" id="view-watchlist" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Список наблюдения</h1>
+            <p class="muted">Кого и что искать в ЕИС</p>
+          </div>
+        </header>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">🏢 Предприятия по ИНН</div>
+            <form class="form" id="form-company">
+              <div class="form-row">
+                <div class="field grow">
+                  <label>ИНН <span class="hint">10 или 12 цифр</span></label>
+                  <input class="input" name="inn" inputmode="numeric" placeholder="6679104561" required />
+                </div>
+                <div class="field grow-2">
+                  <label>Название <span class="hint">необязательно</span></label>
+                  <input class="input" name="name" placeholder="ООО «Пример»" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="field grow">
+                  <label>Роль в закупках</label>
+                  <select class="input" name="role">
+                    <option value="any">Заказчик и поставщик</option>
+                    <option value="customer">Только заказчик (его извещения)</option>
+                    <option value="supplier">Только поставщик (его контракты)</option>
+                  </select>
+                </div>
+                <div class="field grow-2">
+                  <label>Заметка</label>
+                  <input class="input" name="note" placeholder="конкурент, партнёр…" />
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">＋ Добавить предприятие</button>
+            </form>
+            <div class="items" id="company-list"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">📦 Номенклатура</div>
+            <form class="form" id="form-nomen">
+              <div class="form-row">
+                <div class="field grow-2">
+                  <label>Ключевые слова <span class="hint">как в поиске ЕИС</span></label>
+                  <input class="input" name="keyword" placeholder="труба предизолированная" />
+                </div>
+                <div class="field grow">
+                  <label>ОКПД2 <span class="hint">необязательно</span></label>
+                  <input class="input" name="okpd2" placeholder="24.20.13" />
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">＋ Добавить позицию</button>
+            </form>
+            <div class="items" id="nomen-list"></div>
+            <details class="details">
+              <summary>Какие запросы уйдут в ЕИС</summary>
+              <div id="queries-preview" class="queries"></div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- НАСТРОЙКИ -->
+      <section class="view" id="view-settings" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Настройки</h1>
+            <p class="muted">Периодичность опроса, законы, уведомления</p>
+          </div>
+        </header>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">⏱ Опрос</div>
+            <div class="field">
+              <label>Интервал автоопроса, минут</label>
+              <input class="input" id="set-interval" type="number" min="1" max="1440" />
+            </div>
+            <label class="switch"><input type="checkbox" id="set-onlyopen" /> Только закупки на этапе подачи заявок</label>
+            <label class="switch"><input type="checkbox" id="set-contracts" /> Искать контракты по ИНН поставщика (кто что выиграл)</label>
+            <div class="card-title mt">📜 Законы</div>
+            <label class="switch"><input type="checkbox" id="set-fz44" /> 44-ФЗ (госзакупки)</label>
+            <label class="switch"><input type="checkbox" id="set-fz223" /> 223-ФЗ (госкомпании, естественные монополии)</label>
+            <label class="switch"><input type="checkbox" id="set-fz615" /> 615-ПП (капремонт МКД)</label>
+            <button class="btn btn-primary mt" id="btn-save-settings">💾 Сохранить</button>
+          </div>
+          <div class="card">
+            <div class="card-title">🔔 Уведомления</div>
+            <label class="switch"><input type="checkbox" id="set-browser" /> Уведомления браузера о новых закупках</label>
+            <label class="switch"><input type="checkbox" id="set-telegram" /> Отправлять в Telegram <span class="hint" id="tg-hint"></span></label>
+            <p class="muted small">Для Telegram задайте переменные окружения <code>TELEGRAM_BOT_TOKEN</code> и <code>TELEGRAM_CHAT_ID</code> при запуске сервера.</p>
+            <div class="card-title mt">ℹ️ Источник данных</div>
+            <p class="muted small" id="source-note"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ЖУРНАЛ -->
+      <section class="view" id="view-log" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Журнал опросов</h1>
+            <p class="muted">Что и когда запрашивалось, сколько найдено, ошибки</p>
+          </div>
+        </header>
+        <div class="card">
+          <table class="table" id="runs-table">
+            <thead><tr><th>Начало</th><th>Триггер</th><th>Запросов</th><th>Найдено</th><th>Новых</th><th>Ошибки</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
