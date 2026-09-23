@@ -10,6 +10,10 @@
 
 Чтобы получить постоянный адрес `https://sevagd1978.github.io/stoimost/`, в настройках репозитория включите GitHub Pages → Source: **GitHub Actions** (Settings → Pages). После этого workflow задеплоит сайт сам.
 
+## Tender Spy
+
+В папке [`tender-spy/`](tender-spy/README.md) — отдельное приложение для мониторинга тендеров ЕИС (44-ФЗ/223-ФЗ) по ИНН предприятий и номенклатуре. Запуск: `cd tender-spy && npm install && npm start`.
+
 ## Возможности
 
 - Авторасчёт топлива по цене и расходу (л/100 км)
