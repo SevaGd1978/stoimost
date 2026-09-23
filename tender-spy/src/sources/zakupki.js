@@ -223,12 +223,13 @@ export function mapContractItem(item, query) {
 }
 
 export class ZakupkiSource {
-  constructor({ base, userAgent, timeoutMs = 25000, delayMs = 1500, fetchImpl = fetch, log = console }) {
+  constructor({ base, userAgent, timeoutMs = 25000, delayMs = 1500, fetchImpl = fetch, dispatcher, log = console }) {
     this.base = base;
     this.userAgent = userAgent;
     this.timeoutMs = timeoutMs;
     this.delayMs = delayMs;
     this.fetchImpl = fetchImpl;
+    this.dispatcher = dispatcher;
     this.log = log;
   }
 
@@ -236,14 +237,18 @@ export class ZakupkiSource {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
     try {
-      const res = await this.fetchImpl(url, {
+      const fetchOpts = {
         signal: ctrl.signal,
         headers: {
           'User-Agent': this.userAgent,
           Accept: 'application/rss+xml, application/xml, text/xml, */*',
           'Accept-Language': 'ru-RU,ru;q=0.9',
         },
-      });
+      };
+      if (this.dispatcher) {
+        fetchOpts.dispatcher = this.dispatcher;
+      }
+      const res = await this.fetchImpl(url, fetchOpts);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.text();
     } finally {

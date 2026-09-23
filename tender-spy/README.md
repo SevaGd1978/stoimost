@@ -79,14 +79,19 @@ data/db.json              — база (создаётся автоматиче�
 
 | Метод | Путь | Назначение |
 |---|---|---|
-| GET | `/api/state` | настройки, watchlist, статус планировщика, счётчики |
+| GET | `/api/state` | настройки, watchlist, статус планировщика, счётчики, краткая аналитика |
+| GET | `/api/analytics` | сводная аналитика: суммы НМЦК, распределение по законам, этапам, топ заказчиков и поставщиков |
 | GET | `/api/tenders?q=&company=&nomen=&kind=&law=&onlyNew=1&onlyOpen=1&favorite=1&archived=1&sort=` | лента |
 | GET | `/api/tenders.csv?…` | та же выборка в CSV |
 | PATCH | `/api/tenders/:id` | `{seen, favorite, archived, comment}` |
 | POST | `/api/tenders/mark-all-seen` | всё прочитано |
 | POST / PATCH / DELETE | `/api/companies[/:id]` | предприятия `{inn, name, role, note}` |
+| POST | `/api/companies/batch` | пакетное добавление ИНН списком `items: [...]` |
 | POST / DELETE | `/api/nomenclature[/:id]` | номенклатура `{keyword, okpd2}` |
+| GET | `/api/watchlist/export` | экспорт списка наблюдения в JSON |
+| POST | `/api/watchlist/import` | импорт списка наблюдения `{ companies, nomenclature, replace }` |
 | PATCH | `/api/settings` | интервал, законы, фильтр этапа, Telegram |
+| POST | `/api/telegram/test` | тестовая отправка сообщения в Telegram для проверки подключения |
 | POST | `/api/scan` | запустить опрос сейчас |
 | GET | `/api/runs` | журнал опросов |
 | GET | `/api/queries` | какие URL уйдут в ЕИС |

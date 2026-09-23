@@ -10,6 +10,20 @@
 <body>
   <div class="toast-stack" id="toasts"></div>
 
+  <!-- Модальное окно импорта Watchlist -->
+  <div class="modal-backdrop" id="modal-import" hidden>
+    <div class="modal-box">
+      <div class="card-title">Импорт списка наблюдения (JSON)</div>
+      <p class="muted small">Вставьте JSON-структуру или экспортированный файл со списком компаний и номенклатуры:</p>
+      <textarea class="input" id="import-json-input" rows="8" placeholder='{ "companies": [...], "nomenclature": [...] }'></textarea>
+      <label class="switch mt-sm"><input type="checkbox" id="import-replace" /> Заменить текущий список полностью (вместо объединения)</label>
+      <div class="form-row mt">
+        <button class="btn btn-primary" id="btn-import-confirm">Применить импорт</button>
+        <button class="btn btn-ghost" id="btn-import-close">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <div class="layout">
     <aside class="sidebar">
       <div class="brand">
@@ -23,6 +37,7 @@
       <nav class="nav">
         <button class="nav-item active" data-view="feed">📡 Лента <span class="nav-badge" id="badge-unseen" hidden>0</span></button>
         <button class="nav-item" data-view="watchlist">🎯 Наблюдение</button>
+        <button class="nav-item" data-view="analytics">📊 Аналитика</button>
         <button class="nav-item" data-view="settings">⚙️ Настройки</button>
         <button class="nav-item" data-view="log">📜 Журнал опросов</button>
       </nav>
@@ -102,6 +117,10 @@
             <h1>Список наблюдения</h1>
             <p class="muted">Кого и что искать в ЕИС</p>
           </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-export-wl">📤 Экспорт JSON</button>
+            <button class="btn btn-ghost" id="btn-import-wl">📥 Импорт JSON</button>
+          </div>
         </header>
 
         <div class="grid-2">
@@ -132,8 +151,22 @@
                   <input class="input" name="note" placeholder="конкурент, партнёр…" />
                 </div>
               </div>
-              <button class="btn btn-primary" type="submit">＋ Добавить предприятие</button>
+              <div class="form-row">
+                <button class="btn btn-primary" type="submit">＋ Добавить предприятие</button>
+                <button class="btn btn-ghost" type="button" id="btn-batch-company">📋 Пакетный ввод ИНН</button>
+              </div>
             </form>
+
+            <div class="batch-box" id="batch-box" hidden>
+              <div class="card-title">Пакетный ввод ИНН списком</div>
+              <p class="muted small">Вставьте список ИНН (по одному на строку или через запятую/пробел). Можно указывать в формате: <code>ИНН, Название, роль (any|customer|supplier)</code></p>
+              <textarea class="input" id="batch-input" rows="4" placeholder="6679104561, Старк-СПБ&#10;7707083893, Сбербанк, customer&#10;7702070139"></textarea>
+              <div class="form-row mt-sm">
+                <button class="btn btn-primary btn-sm" id="btn-batch-submit">Добавить список</button>
+                <button class="btn btn-ghost btn-sm" id="btn-batch-cancel">Отмена</button>
+              </div>
+            </div>
+
             <div class="items" id="company-list"></div>
           </div>
 
@@ -157,6 +190,72 @@
               <summary>Какие запросы уйдут в ЕИС</summary>
               <div id="queries-preview" class="queries"></div>
             </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- АНАЛИТИКА -->
+      <section class="view" id="view-analytics" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Аналитика выборки</h1>
+            <p class="muted">Суммы НМЦК, распределение по законам, этапам и топ контрагентов</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-refresh-analytics">🔄 Обновить</button>
+          </div>
+        </header>
+
+        <div class="grid-4 mb">
+          <div class="stat-card">
+            <div class="stat-title">Общая сумма НМЦК / контрактов</div>
+            <div class="stat-big" id="an-total-price">0 ₽</div>
+            <div class="stat-sub" id="an-count">0 активных позиций</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Средний чек закупки</div>
+            <div class="stat-big" id="an-avg-price">0 ₽</div>
+            <div class="stat-sub">по закупкам с указанной ценой</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Максимальная закупка</div>
+            <div class="stat-big" id="an-max-price">0 ₽</div>
+            <div class="stat-sub">самый крупный лот</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Доля 44-ФЗ / 223-ФЗ</div>
+            <div class="stat-big" id="an-laws-ratio">—</div>
+            <div class="stat-sub" id="an-laws-sub">распределение бюджета</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">📜 Распределение по законам и типам</div>
+            <table class="table" id="an-laws-table">
+              <thead><tr><th>Категория</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+
+            <div class="card-title mt">📍 Распределение по этапам</div>
+            <table class="table" id="an-stages-table">
+              <thead><tr><th>Этап</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <div class="card-title">🏢 Топ-10 заказчиков (по объёму НМЦК)</div>
+            <table class="table" id="an-customers-table">
+              <thead><tr><th>Заказчик</th><th>Лотов</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+
+            <div class="card-title mt">🏆 Топ-10 поставщиков (по выигранным контрактам)</div>
+            <table class="table" id="an-suppliers-table">
+              <thead><tr><th>Поставщик</th><th>Контрактов</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -188,9 +287,13 @@
             <div class="card-title">🔔 Уведомления</div>
             <label class="switch"><input type="checkbox" id="set-browser" /> Уведомления браузера о новых закупках</label>
             <label class="switch"><input type="checkbox" id="set-telegram" /> Отправлять в Telegram <span class="hint" id="tg-hint"></span></label>
+            <div class="form-row mt-sm" id="tg-test-row">
+              <button class="btn btn-ghost btn-sm" id="btn-test-tg">Тест Telegram</button>
+            </div>
             <p class="muted small">Для Telegram задайте переменные окружения <code>TELEGRAM_BOT_TOKEN</code> и <code>TELEGRAM_CHAT_ID</code> при запуске сервера.</p>
-            <div class="card-title mt">ℹ️ Источник данных</div>
+            <div class="card-title mt">ℹ️ Источник данных и прокси</div>
             <p class="muted small" id="source-note"></p>
+            <p class="muted small">Поддержка исходящего прокси (HTTP/HTTPS/SOCKS5): задайте <code>HTTPS_PROXY=http://user:pass@host:port</code> при запуске.</p>
           </div>
         </div>
       </section>

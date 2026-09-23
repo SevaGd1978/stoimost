@@ -26,10 +26,11 @@ export const config = {
     process.env.TENDER_SPY_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
   zakupkiBase: process.env.TENDER_SPY_ZAKUPKI_BASE || 'https://zakupki.gov.ru',
-  telegram: {
-    token: process.env.TELEGRAM_BOT_TOKEN || '',
-    chatId: process.env.TELEGRAM_CHAT_ID || '',
-  },
+    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.TENDER_SPY_PROXY || '',
+    telegram: {
+      token: process.env.TELEGRAM_BOT_TOKEN || '',
+      chatId: process.env.TELEGRAM_CHAT_ID || '',
+    },
   /** Сколько дней хранить тендеры, которые больше не попадают в выборку */
   retentionDays: envInt('TENDER_SPY_RETENTION_DAYS', 90),
 };

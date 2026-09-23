@@ -9,6 +9,18 @@ import { TelegramNotifier } from './src/notify.js';
 import { Scheduler } from './src/scheduler.js';
 import { keywordMatches } from './src/tenders.js';
 
+let proxyDispatcher = undefined;
+if (config.proxy && typeof fetch === 'function') {
+  try {
+    const undici = await import('undici').catch(() => null);
+    if (undici?.ProxyAgent) {
+      proxyDispatcher = new undici.ProxyAgent(config.proxy);
+    }
+  } catch (err) {
+    console.warn('[config] Не удалось инициализировать ProxyAgent:', err.message);
+  }
+}
+
 const log = console;
 const store = new Store(config.dataFile);
 
@@ -20,6 +32,7 @@ const source =
         userAgent: config.userAgent,
         timeoutMs: config.requestTimeoutMs,
         delayMs: config.requestDelayMs,
+        dispatcher: proxyDispatcher,
         log,
       });
 
@@ -67,6 +80,74 @@ function stats() {
   };
 }
 
+function analytics() {
+  const all = Object.values(store.tenders);
+  const active = all.filter((t) => !t.archived);
+
+  let totalPrice = 0;
+  let priceCount = 0;
+  let maxPrice = 0;
+  const byLaw = { 44: { count: 0, sum: 0 }, 223: { count: 0, sum: 0 }, 615: { count: 0, sum: 0 }, other: { count: 0, sum: 0 } };
+  const byKind = { notice: { count: 0, sum: 0 }, contract: { count: 0, sum: 0 } };
+  const byStage = {};
+  const customerMap = new Map();
+  const supplierMap = new Map();
+
+  for (const t of active) {
+    const p = typeof t.price === 'number' && Number.isFinite(t.price) ? t.price : 0;
+    if (p > 0) {
+      totalPrice += p;
+      priceCount++;
+      if (p > maxPrice) maxPrice = p;
+    }
+
+    const lawKey = byLaw[t.law] ? t.law : 'other';
+    byLaw[lawKey].count++;
+    byLaw[lawKey].sum += p;
+
+    const kindKey = t.kind === 'contract' ? 'contract' : 'notice';
+    byKind[kindKey].count++;
+    byKind[kindKey].sum += p;
+
+    const st = t.stage || 'Не указан';
+    if (!byStage[st]) byStage[st] = { count: 0, sum: 0 };
+    byStage[st].count++;
+    byStage[st].sum += p;
+
+    if (t.customer) {
+      const cur = customerMap.get(t.customer) || { name: t.customer, count: 0, sum: 0 };
+      cur.count++;
+      cur.sum += p;
+      customerMap.set(t.customer, cur);
+    }
+    if (t.supplier) {
+      const cur = supplierMap.get(t.supplier) || { name: t.supplier, count: 0, sum: 0 };
+      cur.count++;
+      cur.sum += p;
+      supplierMap.set(t.supplier, cur);
+    }
+  }
+
+  const topCustomers = Array.from(customerMap.values())
+    .sort((a, b) => b.sum - a.sum || b.count - a.count)
+    .slice(0, 10);
+  const topSuppliers = Array.from(supplierMap.values())
+    .sort((a, b) => b.sum - a.sum || b.count - a.count)
+    .slice(0, 10);
+
+  return {
+    totalTenders: active.length,
+    totalPrice,
+    avgPrice: priceCount > 0 ? Math.round(totalPrice / priceCount) : 0,
+    maxPrice,
+    byLaw,
+    byKind,
+    byStage,
+    topCustomers,
+    topSuppliers,
+  };
+}
+
 app.get('/api/state', (_req, res) => {
   res.json({
     mode: config.mode,
@@ -74,8 +155,13 @@ app.get('/api/state', (_req, res) => {
     watchlist: { companies: store.companies, nomenclature: store.nomenclature },
     status: scheduler.status,
     stats: stats(),
+    analytics: analytics(),
     lastRun: store.runs[0] ?? null,
   });
+});
+
+app.get('/api/analytics', (_req, res) => {
+  res.json(analytics());
 });
 
 // ---- tenders ----------------------------------------------------------------
@@ -172,6 +258,28 @@ app.post('/api/companies', (req, res) => {
   res.status(created ? 201 : 200).json(company);
 });
 
+app.post('/api/companies/batch', (req, res) => {
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!rawItems.length) return res.status(400).json({ error: 'Передайте массив items' });
+  const overwrite = Boolean(req.body?.overwrite);
+  const validItems = [];
+  const invalid = [];
+
+  for (const raw of rawItems) {
+    const inn = normalizeInn(raw.inn);
+    if (!isValidInn(inn)) {
+      invalid.push({ raw, reason: 'Некорректный ИНН или контрольная сумма' });
+      continue;
+    }
+    const role = ['any', 'customer', 'supplier'].includes(raw.role) ? raw.role : 'any';
+    validItems.push({ inn, name: raw.name, role, note: raw.note });
+  }
+
+  const result = store.importCompanies(validItems, { overwriteExisting: overwrite });
+  result.invalid = invalid;
+  res.json(result);
+});
+
 app.patch('/api/companies/:id', (req, res) => {
   const patch = {};
   if (typeof req.body?.name === 'string' && req.body.name.trim()) patch.name = req.body.name.trim();
@@ -201,12 +309,53 @@ app.delete('/api/nomenclature/:id', (req, res) => {
   res.json({ removed: store.removeNomenclature(req.params.id) });
 });
 
+// ---- watchlist: импорт/экспорт ----------------------------------------------
+app.get('/api/watchlist/export', (_req, res) => {
+  res.json(store.exportWatchlist());
+});
+
+app.post('/api/watchlist/import', (req, res) => {
+  const payload = req.body || {};
+  const replace = Boolean(req.body?.replace);
+  const rawCompanies = Array.isArray(payload.companies) ? payload.companies : [];
+  const rawNomen = Array.isArray(payload.nomenclature) ? payload.nomenclature : [];
+
+  const validCompanies = [];
+  const invalidCompanies = [];
+  for (const raw of rawCompanies) {
+    const inn = normalizeInn(raw.inn);
+    if (!isValidInn(inn)) {
+      invalidCompanies.push({ raw, reason: 'Некорректный ИНН' });
+      continue;
+    }
+    const role = ['any', 'customer', 'supplier'].includes(raw.role) ? raw.role : 'any';
+    validCompanies.push({ inn, name: raw.name, role, note: raw.note });
+  }
+
+  const validNomen = [];
+  for (const raw of rawNomen) {
+    const keyword = String(raw.keyword ?? '').trim();
+    const okpd2 = String(raw.okpd2 ?? '').trim();
+    if (keyword || okpd2) validNomen.push({ keyword, okpd2 });
+  }
+
+  const result = store.importWatchlist({ companies: validCompanies, nomenclature: validNomen }, { replace });
+  result.invalidCompanies = invalidCompanies;
+  res.json(result);
+});
+
 // ---- настройки, опрос, история -----------------------------------------------
 app.patch('/api/settings', (req, res) => {
   const before = store.settings.pollIntervalMin;
   const settings = store.updateSettings(req.body ?? {});
   if (settings.pollIntervalMin !== before) scheduler.schedule();
   res.json(settings);
+});
+
+app.post('/api/telegram/test', async (_req, res) => {
+  const result = await notifier.testConnection();
+  if (result.ok) res.json({ ok: true, message: 'Тестовое сообщение успешно отправлено в Telegram' });
+  else res.status(400).json({ ok: false, error: result.error || 'Не удалось отправить сообщение' });
 });
 
 app.post('/api/scan', async (_req, res) => {

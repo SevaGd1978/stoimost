@@ -104,6 +104,50 @@ export class Store {
     return { company, created: true };
   }
 
+  /**
+   * Пакетный импорт компаний.
+   * items: массив объектов { inn, name?, role?, note? }
+   * options: { overwriteExisting: boolean }
+   */
+  importCompanies(items = [], { overwriteExisting = false } = {}) {
+    let added = 0;
+    let updated = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (const item of items) {
+      const inn = String(item.inn || '').trim();
+      if (!inn) {
+        errors.push({ item, error: 'ИНН не указан' });
+        continue;
+      }
+      const existing = this.companies.find((c) => c.inn === inn);
+      if (existing) {
+        if (overwriteExisting) {
+          if (item.name?.trim()) existing.name = item.name.trim();
+          if (['any', 'customer', 'supplier'].includes(item.role)) existing.role = item.role;
+          if (typeof item.note === 'string') existing.note = item.note.trim();
+          updated++;
+        } else {
+          skipped++;
+        }
+      } else {
+        const company = {
+          id: newId('c_'),
+          inn,
+          name: item.name?.trim() || `ИНН ${inn}`,
+          role: ['any', 'customer', 'supplier'].includes(item.role) ? item.role : 'any',
+          note: item.note?.trim() || '',
+          createdAt: new Date().toISOString(),
+        };
+        this.companies.push(company);
+        added++;
+      }
+    }
+    if (added || updated) this.scheduleSave();
+    return { added, updated, skipped, errors, total: this.companies.length };
+  }
+
   updateCompany(id, patch) {
     const company = this.companies.find((c) => c.id === id);
     if (!company) return null;
@@ -132,11 +176,73 @@ export class Store {
     return { item, created: true };
   }
 
+  /**
+   * Пакетный импорт номенклатуры.
+   * items: массив { keyword, okpd2 }
+   */
+  importNomenclature(items = []) {
+    let added = 0;
+    let skipped = 0;
+    for (const item of items) {
+      const kw = String(item.keyword ?? '').trim();
+      const code = String(item.okpd2 ?? '').trim();
+      if (!kw && !code) continue;
+      const exists = this.nomenclature.find(
+        (n) => n.keyword.toLowerCase() === kw.toLowerCase() && n.okpd2 === code,
+      );
+      if (exists) {
+        skipped++;
+      } else {
+        this.nomenclature.push({
+          id: newId('n_'),
+          keyword: kw,
+          okpd2: code,
+          createdAt: new Date().toISOString(),
+        });
+        added++;
+      }
+    }
+    if (added) this.scheduleSave();
+    return { added, skipped, total: this.nomenclature.length };
+  }
+
   removeNomenclature(id) {
     const before = this.nomenclature.length;
     this.db.watchlist.nomenclature = this.nomenclature.filter((n) => n.id !== id);
     this.scheduleSave();
     return this.nomenclature.length !== before;
+  }
+
+  // ---- watchlist export/import -----------------------------------------
+
+  exportWatchlist() {
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      companies: this.companies.map((c) => ({
+        inn: c.inn,
+        name: c.name,
+        role: c.role,
+        note: c.note,
+      })),
+      nomenclature: this.nomenclature.map((n) => ({
+        keyword: n.keyword,
+        okpd2: n.okpd2,
+      })),
+    };
+  }
+
+  importWatchlist({ companies = [], nomenclature = [] }, { replace = false } = {}) {
+    if (replace) {
+      this.db.watchlist.companies = [];
+      this.db.watchlist.nomenclature = [];
+    }
+    const cRes = this.importCompanies(companies, { overwriteExisting: !replace });
+    const nRes = this.importNomenclature(nomenclature);
+    return {
+      companies: cRes,
+      nomenclature: nRes,
+    };
   }
 
   // ---- tenders ---------------------------------------------------------

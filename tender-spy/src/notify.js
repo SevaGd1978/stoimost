@@ -39,14 +39,28 @@ export class TelegramNotifier {
       body: JSON.stringify({ chat_id: this.chatId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
     });
     if (!res.ok) {
-      this.log.warn?.(`[telegram] HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-      return false;
+      const errText = await res.text().catch(() => '');
+      this.log.warn?.(`[telegram] HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      return { ok: false, status: res.status, error: errText.slice(0, 200) };
     }
-    return true;
+    return { ok: true };
+  }
+
+  async testConnection() {
+    if (!this.enabled) return { ok: false, error: 'Токен бота или Chat ID не заданы' };
+    try {
+      const msg = `🕵️ <b>Tender Spy</b>\nТестовое уведомление: связь с Telegram успешно настроена! 🚀\nВремя: ${new Date().toLocaleString('ru-RU')}`;
+      const res = await this.send(msg);
+      if (res && res.ok) return { ok: true };
+      return { ok: false, error: res?.error || `HTTP ${res?.status || 'error'}` };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   }
 
   async notifyNewTenders(tenders) {
     if (!tenders.length) return false;
-    return this.send(formatTelegramMessage(tenders));
+    const res = await this.send(formatTelegramMessage(tenders));
+    return Boolean(res && res.ok);
   }
 }

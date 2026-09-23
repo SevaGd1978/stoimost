@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store } from '../src/store.js';
 import { Scheduler } from '../src/scheduler.js';
+import { TelegramNotifier } from '../src/notify.js';
 
 function tmpFile() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tender-spy-')), 'db.json');
@@ -94,6 +95,52 @@ test('Scheduler.runOnce: фильтрует закрытые при onlyOpen, с
   const again = await scheduler.runOnce({ trigger: 'timer' });
   scheduler.stop();
   assert.equal(again.added, 0);
+});
+
+test('Store: пакетный импорт компаний и номенклатуры, экспорт watchlist', () => {
+  const store = new Store(tmpFile());
+  const cRes = store.importCompanies([
+    { inn: '6679104561', name: 'Старк-СПБ', role: 'customer' },
+    { inn: '7707083893', name: 'Сбербанк', role: 'customer' },
+    { inn: '6679104561', name: 'Старк дубль' }, // дубль без overwrite
+  ]);
+  assert.equal(cRes.added, 2);
+  assert.equal(cRes.skipped, 1);
+  assert.equal(store.companies.length, 2);
+
+  const nRes = store.importNomenclature([
+    { keyword: 'Котел газовый', okpd2: '25.21.12' },
+    { keyword: 'Трубы стальные', okpd2: '' },
+    { keyword: 'котел газовый', okpd2: '25.21.12' }, // дубль
+  ]);
+  assert.equal(nRes.added, 2);
+  assert.equal(nRes.skipped, 1);
+  assert.equal(store.nomenclature.length, 2);
+
+  const exported = store.exportWatchlist();
+  assert.equal(exported.companies.length, 2);
+  assert.equal(exported.nomenclature.length, 2);
+
+  const freshStore = new Store(tmpFile());
+  const imp = freshStore.importWatchlist(exported);
+  assert.equal(imp.companies.added, 2);
+  assert.equal(imp.nomenclature.added, 2);
+  assert.equal(freshStore.companies[0].inn, '6679104561');
+});
+
+test('TelegramNotifier: testConnection возвращает ошибку, если не настроен', async () => {
+  const disabledNotifier = new TelegramNotifier({ token: '', chatId: '' });
+  const res = await disabledNotifier.testConnection();
+  assert.equal(res.ok, false);
+  assert.match(res.error, /не заданы/);
+
+  const mockNotifier = new TelegramNotifier({
+    token: 'test-token',
+    chatId: '12345',
+    fetchImpl: async () => ({ ok: true, json: async () => ({ ok: true }) }),
+  });
+  const mockRes = await mockNotifier.testConnection();
+  assert.equal(mockRes.ok, true);
 });
 
 test('Scheduler.runOnce с пустым watchlist возвращает подсказку', async () => {

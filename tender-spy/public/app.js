@@ -50,6 +50,7 @@
     $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     if (name === 'watchlist') loadQueries();
+    if (name === 'analytics') loadAnalytics();
     if (name === 'log') loadRuns();
     location.hash = name;
   }
@@ -246,6 +247,86 @@
         .join('') || '<div class="muted small">Добавьте ключевые слова или ОКПД2.</div>';
   }
 
+  // Пакетный ввод ИНН
+  $('#btn-batch-company').addEventListener('click', () => {
+    $('#batch-box').hidden = !$('#batch-box').hidden;
+  });
+  $('#btn-batch-cancel').addEventListener('click', () => {
+    $('#batch-box').hidden = true;
+  });
+  $('#btn-batch-submit').addEventListener('click', async () => {
+    const rawText = $('#batch-input').value.trim();
+    if (!rawText) return toast('Введите хотя бы один ИНН', 'err');
+    const lines = rawText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+    const items = [];
+    for (const line of lines) {
+      const parts = line.split(/[,;\t]+/).map((s) => s.trim());
+      const inn = parts[0];
+      const name = parts[1] || '';
+      let role = (parts[2] || 'any').toLowerCase();
+      if (!['any', 'customer', 'supplier'].includes(role)) role = 'any';
+      items.push({ inn, name, role });
+    }
+    try {
+      const res = await api('/api/companies/batch', { method: 'POST', body: { items } });
+      toast(`Добавлено: ${res.added}, пропущено (дубли): ${res.skipped}`, res.added ? 'ok' : '');
+      if (res.invalid?.length) {
+        toast(`Ошибочных ИНН: ${res.invalid.length}`, 'err');
+      }
+      $('#batch-input').value = '';
+      $('#batch-box').hidden = true;
+      await loadState();
+      loadQueries();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  // Экспорт и импорт Watchlist (JSON)
+  $('#btn-export-wl').addEventListener('click', async () => {
+    try {
+      const data = await api('/api/watchlist/export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tender-spy-watchlist-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Список наблюдения экспортирован', 'ok');
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#btn-import-wl').addEventListener('click', () => {
+    $('#modal-import').hidden = false;
+  });
+  $('#btn-import-close').addEventListener('click', () => {
+    $('#modal-import').hidden = true;
+  });
+  $('#btn-import-confirm').addEventListener('click', async () => {
+    const raw = $('#import-json-input').value.trim();
+    if (!raw) return toast('Вставьте JSON', 'err');
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      return toast(`Невалидный JSON: ${e.message}`, 'err');
+    }
+    const replace = $('#import-replace').checked;
+    try {
+      const res = await api('/api/watchlist/import', { method: 'POST', body: { ...parsed, replace } });
+      toast(`Импортировано предприятий: ${res.companies?.added || 0}, номенклатуры: ${res.nomenclature?.added || 0}`, 'ok');
+      $('#modal-import').hidden = true;
+      $('#import-json-input').value = '';
+      await loadState();
+      loadQueries();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
   $('#form-company').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -353,6 +434,18 @@
     await loadState();
   });
 
+  $('#btn-test-tg').addEventListener('click', async () => {
+    $('#btn-test-tg').disabled = true;
+    try {
+      const res = await api('/api/telegram/test', { method: 'POST' });
+      toast(res.message || 'Тест успешен!', 'ok');
+    } catch (err) {
+      toast(`Ошибка Telegram: ${err.message}`, 'err');
+    } finally {
+      $('#btn-test-tg').disabled = false;
+    }
+  });
+
   $('#set-browser').addEventListener('change', async (e) => {
     if (e.target.checked) {
       if (!('Notification' in window)) {
@@ -370,6 +463,63 @@
     state.browserNotify = e.target.checked;
     localStorage.setItem('ts.browserNotify', state.browserNotify ? '1' : '0');
   });
+
+  // ---------- аналитика ----------
+  async function loadAnalytics() {
+    try {
+      const data = await api('/api/analytics');
+      $('#an-total-price').textContent = `${fmtPrice(data.totalPrice)} ₽`;
+      $('#an-count').textContent = `${data.totalTenders} активных позиций`;
+      $('#an-avg-price').textContent = `${fmtPrice(data.avgPrice)} ₽`;
+      $('#an-max-price').textContent = `${fmtPrice(data.maxPrice)} ₽`;
+
+      const sum44 = data.byLaw['44']?.sum || 0;
+      const sum223 = data.byLaw['223']?.sum || 0;
+      const totalLaws = sum44 + sum223 || 1;
+      const pct44 = Math.round((sum44 / totalLaws) * 100);
+      const pct223 = 100 - pct44;
+      $('#an-laws-ratio').textContent = `${pct44}% / ${pct223}%`;
+      $('#an-laws-sub').textContent = `44-ФЗ: ${fmtPrice(sum44)} ₽ · 223-ФЗ: ${fmtPrice(sum223)} ₽`;
+
+      const lawsTb = $('#an-laws-table tbody');
+      const rows = [
+        { label: '44-ФЗ (госзакупки)', ...data.byLaw['44'] },
+        { label: '223-ФЗ (госкомпании)', ...data.byLaw['223'] },
+        { label: '615-ПП (капремонт)', ...data.byLaw['615'] },
+        { label: 'Извещения (все)', ...data.byKind.notice },
+        { label: 'Контракты (выигранные)', ...data.byKind.contract },
+      ];
+      lawsTb.innerHTML = rows
+        .map((r) => `<tr><td>${esc(r.label)}</td><td>${r.count || 0}</td><td>${fmtPrice(r.sum || 0)} ₽</td></tr>`)
+        .join('');
+
+      const stagesTb = $('#an-stages-table tbody');
+      const stKeys = Object.keys(data.byStage || {});
+      stagesTb.innerHTML = stKeys.length
+        ? stKeys
+            .map((k) => `<tr><td>${esc(k)}</td><td>${data.byStage[k].count}</td><td>${fmtPrice(data.byStage[k].sum)} ₽</td></tr>`)
+            .join('')
+        : '<tr><td colspan="3" class="muted">Нет данных</td></tr>';
+
+      const custTb = $('#an-customers-table tbody');
+      custTb.innerHTML = data.topCustomers?.length
+        ? data.topCustomers
+            .map((c) => `<tr><td>${esc(c.name)}</td><td>${c.count}</td><td>${fmtPrice(c.sum)} ₽</td></tr>`)
+            .join('')
+        : '<tr><td colspan="3" class="muted">Нет заказчиков</td></tr>';
+
+      const suppTb = $('#an-suppliers-table tbody');
+      suppTb.innerHTML = data.topSuppliers?.length
+        ? data.topSuppliers
+            .map((s) => `<tr><td>${esc(s.name)}</td><td>${s.count}</td><td>${fmtPrice(s.sum)} ₽</td></tr>`)
+            .join('')
+        : '<tr><td colspan="3" class="muted">Нет поставщиков</td></tr>';
+    } catch (err) {
+      toast(`Ошибка аналитики: ${err.message}`, 'err');
+    }
+  }
+
+  $('#btn-refresh-analytics').addEventListener('click', () => loadAnalytics());
 
   // ---------- журнал ----------
   async function loadRuns() {
@@ -443,7 +593,7 @@
       await loadFeed();
       connectEvents();
       const view = location.hash.replace('#', '');
-      if (['feed', 'watchlist', 'settings', 'log'].includes(view)) showView(view);
+      if (['feed', 'watchlist', 'analytics', 'settings', 'log'].includes(view)) showView(view);
       else if (!state.watchlist.companies.length && !state.watchlist.nomenclature.length) showView('watchlist');
     } catch (err) {
       toast(`Не удалось загрузить: ${err.message}`, 'err');
