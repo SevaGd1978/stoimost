@@ -131,45 +131,13 @@ export class DemoSource {
     };
   }
 
-  async collect({ companies = [], nomenclature = [], settings = {} }) {
+  async collect({ nomenclature = [], settings = {} }) {
     runCounter += 1;
     const laws = settings.laws ?? { fz44: true, fz223: true };
     const lawPool = [laws.fz44 !== false && '44', laws.fz223 !== false && '223'].filter(Boolean);
     if (!lawPool.length) lawPool.push('44');
     const keywords = nomenclature.map((n) => n.keyword).filter(Boolean);
     const tenders = [];
-
-    for (const c of companies) {
-      const r = rng(hash(c.inn));
-      const customer = { name: c.name, inn: c.inn, region: pick(r, CUSTOMERS).region };
-      if (c.role !== 'supplier') {
-        for (let i = 0; i < 3; i++) {
-          const kw = keywords.length ? pick(r, keywords) : 'оборудование и материалы';
-          tenders.push(
-            this.makeNotice(r, {
-              subject: pick(r, SUBJECT_TEMPLATES).replace('{kw}', kw).replace('{short}', shortName(c.name)).replace('{okpd}', '24.20.13'),
-              customer,
-              law: pick(r, lawPool),
-              match: { type: 'company', ref: c.inn, label: c.name, via: 'notice', strong: true },
-              ageDays: 1 + Math.floor(r() * 20),
-            }),
-          );
-        }
-      }
-      if (c.role !== 'customer' && settings.searchContracts !== false) {
-        for (let i = 0; i < 2; i++) {
-          const kw = keywords.length ? pick(r, keywords) : 'работы по договору подряда';
-          tenders.push(
-            this.makeContract(r, {
-              company: c,
-              subject: pick(r, SUBJECT_TEMPLATES).replace('{kw}', kw).replace('{short}', 'заказчика').replace('{okpd}', '24.20.13'),
-              customer: pick(r, CUSTOMERS),
-              law: pick(r, lawPool),
-            }),
-          );
-        }
-      }
-    }
 
     for (const n of nomenclature) {
       const r = rng(hash(`${n.keyword}|${n.okpd2}`));
@@ -196,25 +164,23 @@ export class DemoSource {
     }
 
     // Каждый новый опрос подбрасывает одну «свежую» закупку — чтобы было видно, как работают бейджи «новое».
-    if (nomenclature.length || companies.length) {
+    if (nomenclature.length) {
       const r = rng(hash(`fresh-${runCounter}-${Date.now() >> 16}`));
       const customer = pick(r, CUSTOMERS);
       const kw = keywords.length ? pick(r, keywords) : 'оборудование';
-      const src = nomenclature[0] || null;
+      const src = nomenclature[0];
       tenders.push(
         this.makeNotice(r, {
           subject: `Срочная закупка: ${kw} (опубликовано только что)`,
           customer,
           law: pick(r, lawPool),
-          match: src
-            ? { type: 'keyword', ref: src.keyword || src.okpd2, label: src.keyword || `ОКПД2 ${src.okpd2}`, strong: true }
-            : { type: 'company', ref: companies[0].inn, label: companies[0].name, via: 'notice', strong: false },
+          match: { type: 'keyword', ref: src.keyword || src.okpd2, label: src.keyword || `ОКПД2 ${src.okpd2}`, strong: true },
           ageDays: 0,
         }),
       );
     }
 
     this.log.info?.(`[demo] сгенерировано ${tenders.length} карточек`);
-    return { tenders, errors: [], queriesRun: companies.length * 2 + nomenclature.length };
+    return { tenders, errors: [], queriesRun: nomenclature.length };
   }
 }

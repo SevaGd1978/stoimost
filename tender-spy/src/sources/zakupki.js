@@ -4,13 +4,8 @@
  * Официального публичного REST API у ЕИС нет, но у расширенного поиска
  * извещений и реестра контрактов есть RSS-выгрузка — её и используем.
  *
- * Схема опроса для каждого предприятия из watchlist:
- *   • извещения (44-ФЗ/223-ФЗ/615-ПП), где ИНН встречается в карточке
- *     (в первую очередь — предприятие как заказчик) — searchString=<ИНН>;
- *   • реестр контрактов по ИНН поставщика — так видно, какие тендеры
- *     предприятие выигрывает (участие в открытой закупке до публикации
- *     протоколов ЕИС не раскрывает — это ограничение самого ЕИС).
- * Для номенклатуры — полнотекстовый поиск по ключевым словам и/или ОКПД2.
+ * Схема опроса: только номенклатура — полнотекстовый поиск извещений
+ * по ключевым словам и/или коду ОКПД2. Поиск по ИНН заказчика и поставщика не выполняется.
  *
  * Имена параметров соответствуют формам расширенного поиска ЕИС; если ЕИС
  * переименует поля, править нужно только QUERY_TEMPLATES ниже.
@@ -85,38 +80,10 @@ export function buildUrl(base, path, params) {
  * Формирует список запросов к ЕИС по watchlist.
  * Каждый запрос знает, ради чего он сделан (match) — это попадёт в карточку.
  */
-export function buildQueries({ companies = [], nomenclature = [], settings = {}, base = 'https://zakupki.gov.ru' }) {
+export function buildQueries({ nomenclature = [], settings = {}, base = 'https://zakupki.gov.ru' }) {
   const laws = settings.laws ?? { fz44: true, fz223: true, fz615: false };
   const stage = settings.onlyOpen === false ? QUERY_TEMPLATES.notices.stageAll : QUERY_TEMPLATES.notices.stageOpen;
   const queries = [];
-
-  for (const c of companies) {
-    if (c.role !== 'supplier') {
-      queries.push({
-        kind: 'notices',
-        label: `Извещения · ИНН ${c.inn} (${c.name})`,
-        match: { type: 'company', ref: c.inn, label: c.name, via: 'notice' },
-        url: buildUrl(base, QUERY_TEMPLATES.notices.path, {
-          ...QUERY_TEMPLATES.notices.base,
-          ...stage,
-          ...lawParams(QUERY_TEMPLATES.notices, laws),
-          [QUERY_TEMPLATES.notices.searchString]: c.inn,
-        }),
-      });
-    }
-    if (settings.searchContracts !== false && c.role !== 'customer') {
-      queries.push({
-        kind: 'contracts',
-        label: `Контракты · поставщик ИНН ${c.inn} (${c.name})`,
-        match: { type: 'company', ref: c.inn, label: c.name, via: 'contract' },
-        url: buildUrl(base, QUERY_TEMPLATES.contracts.path, {
-          ...QUERY_TEMPLATES.contracts.base,
-          ...lawParams(QUERY_TEMPLATES.contracts, laws),
-          [QUERY_TEMPLATES.contracts.supplierInn]: c.inn,
-        }),
-      });
-    }
-  }
 
   for (const n of nomenclature) {
     const params = {

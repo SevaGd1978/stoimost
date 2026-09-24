@@ -72,7 +72,7 @@ test('Store.prune удаляет устаревшие, кроме избранн
 
 test('Scheduler.runOnce: фильтрует закрытые при onlyOpen, считает новые, шлёт в Telegram', async () => {
   const store = new Store(tmpFile());
-  store.addCompany({ inn: '6679104561', name: 'Старк' });
+  store.addNomenclature({ keyword: 'труба' });
   store.updateSettings({ notifyTelegram: true });
   const source = {
     async collect() {
@@ -148,5 +148,5 @@ test('Scheduler.runOnce с пустым watchlist возвращает подс�
   const scheduler = new Scheduler({ store, source: { collect: async () => ({ tenders: [], errors: [], queriesRun: 0 }) }, notifier: null, log: {} });
   const run = await scheduler.runOnce();
   scheduler.stop();
-  assert.match(run.errors[0].message, /пуст/);
+  assert.match(run.errors[0].message, /номенклатур/);
 });

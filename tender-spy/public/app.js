@@ -85,7 +85,7 @@
     $('#source-note').textContent =
       mode === 'demo'
         ? 'Сервер запущен в демо-режиме: карточки сгенерированы локально и лишь имитируют выдачу ЕИС. Запустите без флага --demo для реальных данных.'
-        : 'Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru): извещения по ИНН заказчика и ключевым словам/ОКПД2, реестр контрактов по ИНН поставщика. Участники открытой закупки становятся видны только после публикации протоколов — это ограничение ЕИС.';
+        : 'Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru) по ключевым словам и кодам ОКПД2. Поиск по ИНН не выполняется.';
   }
 
   // ---------- лента ----------
@@ -93,8 +93,6 @@
     const p = new URLSearchParams();
     const q = $('#f-q').value.trim();
     if (q) p.set('q', q);
-    const company = $('#f-company').value;
-    if (company) p.set('company', company);
     const nomen = $('#f-nomen').value;
     if (nomen) p.set('nomen', nomen);
     p.set('kind', $('#f-kind').value);
@@ -194,7 +192,7 @@
     feedTimer = setTimeout(() => loadFeed().catch((e) => toast(e.message, 'err')), 200);
   };
   ['#f-q'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
-  ['#f-company', '#f-nomen', '#f-kind', '#f-law', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch'].forEach((s) => $(s).addEventListener('change', debouncedFeed));
+  ['#f-nomen', '#f-kind', '#f-law', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch'].forEach((s) => $(s).addEventListener('change', debouncedFeed));
 
   $('#btn-mark-seen').addEventListener('click', async () => {
     const r = await api('/api/tenders/mark-all-seen', { method: 'POST' });
@@ -203,10 +201,6 @@
   });
 
   function fillFilterSelects() {
-    const cs = $('#f-company');
-    const cur = cs.value;
-    cs.innerHTML = '<option value="">Все предприятия</option>' + state.watchlist.companies.map((c) => `<option value="${esc(c.inn)}">${esc(c.name)} · ${esc(c.inn)}</option>`).join('');
-    cs.value = cur;
     const ns = $('#f-nomen');
     const curN = ns.value;
     ns.innerHTML = '<option value="">Вся номенклатура</option>' + state.watchlist.nomenclature.map((n) => `<option value="${esc(n.keyword || n.okpd2)}">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</option>`).join('');
@@ -215,22 +209,6 @@
 
   // ---------- наблюдение ----------
   function renderWatchlist() {
-    const roleName = { any: 'заказчик + поставщик', customer: 'заказчик', supplier: 'поставщик' };
-    $('#company-list').innerHTML =
-      state.watchlist.companies
-        .map(
-          (c) => `
-        <div class="item" data-id="${esc(c.id)}">
-          <div class="item-main">
-            <div class="item-title">${esc(c.name)} <span class="role">${roleName[c.role] || c.role}</span></div>
-            <div class="item-sub">ИНН <code>${esc(c.inn)}</code>${c.note ? ` · ${esc(c.note)}` : ''}</div>
-          </div>
-          <button class="btn btn-sm" data-act="feed" title="Показать в ленте">📡</button>
-          <button class="btn btn-sm btn-danger" data-act="del" title="Удалить">✕</button>
-        </div>`,
-        )
-        .join('') || '<div class="muted small">Пока ни одного предприятия. Добавьте ИНН выше.</div>';
-
     $('#nomen-list').innerHTML =
       state.watchlist.nomenclature
         .map(
@@ -246,41 +224,6 @@
         )
         .join('') || '<div class="muted small">Добавьте ключевые слова или ОКПД2.</div>';
   }
-
-  // Пакетный ввод ИНН
-  $('#btn-batch-company').addEventListener('click', () => {
-    $('#batch-box').hidden = !$('#batch-box').hidden;
-  });
-  $('#btn-batch-cancel').addEventListener('click', () => {
-    $('#batch-box').hidden = true;
-  });
-  $('#btn-batch-submit').addEventListener('click', async () => {
-    const rawText = $('#batch-input').value.trim();
-    if (!rawText) return toast('Введите хотя бы один ИНН', 'err');
-    const lines = rawText.split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
-    const items = [];
-    for (const line of lines) {
-      const parts = line.split(/[,;\t]+/).map((s) => s.trim());
-      const inn = parts[0];
-      const name = parts[1] || '';
-      let role = (parts[2] || 'any').toLowerCase();
-      if (!['any', 'customer', 'supplier'].includes(role)) role = 'any';
-      items.push({ inn, name, role });
-    }
-    try {
-      const res = await api('/api/companies/batch', { method: 'POST', body: { items } });
-      toast(`Добавлено: ${res.added}, пропущено (дубли): ${res.skipped}`, res.added ? 'ok' : '');
-      if (res.invalid?.length) {
-        toast(`Ошибочных ИНН: ${res.invalid.length}`, 'err');
-      }
-      $('#batch-input').value = '';
-      $('#batch-box').hidden = true;
-      await loadState();
-      loadQueries();
-    } catch (err) {
-      toast(err.message, 'err');
-    }
-  });
 
   // Экспорт и импорт Watchlist (JSON)
   $('#btn-export-wl').addEventListener('click', async () => {
@@ -317,23 +260,9 @@
     const replace = $('#import-replace').checked;
     try {
       const res = await api('/api/watchlist/import', { method: 'POST', body: { ...parsed, replace } });
-      toast(`Импортировано предприятий: ${res.companies?.added || 0}, номенклатуры: ${res.nomenclature?.added || 0}`, 'ok');
+      toast(`Импортировано позиций номенклатуры: ${res.nomenclature?.added || 0}`, 'ok');
       $('#modal-import').hidden = true;
       $('#import-json-input').value = '';
-      await loadState();
-      loadQueries();
-    } catch (err) {
-      toast(err.message, 'err');
-    }
-  });
-
-  $('#form-company').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    try {
-      const c = await api('/api/companies', { method: 'POST', body: Object.fromEntries(fd) });
-      toast(`Добавлено: ${c.name}`, 'ok');
-      e.target.reset();
       await loadState();
       loadQueries();
     } catch (err) {
@@ -352,23 +281,6 @@
       loadQueries();
     } catch (err) {
       toast(err.message, 'err');
-    }
-  });
-
-  $('#company-list').addEventListener('click', async (e) => {
-    const btn = e.target.closest('button[data-act]');
-    if (!btn) return;
-    const item = btn.closest('.item');
-    const c = state.watchlist.companies.find((x) => x.id === item.dataset.id);
-    if (btn.dataset.act === 'del') {
-      if (!confirm(`Удалить ${c.name} из наблюдения?`)) return;
-      await api(`/api/companies/${c.id}`, { method: 'DELETE' });
-      await loadState();
-      loadQueries();
-    } else {
-      $('#f-company').value = c.inn;
-      showView('feed');
-      loadFeed();
     }
   });
 
@@ -401,7 +313,6 @@
     if (!s) return;
     $('#set-interval').value = s.pollIntervalMin;
     $('#set-onlyopen').checked = s.onlyOpen;
-    $('#set-contracts').checked = s.searchContracts;
     $('#set-fz44').checked = s.laws.fz44;
     $('#set-fz223').checked = s.laws.fz223;
     $('#set-fz615').checked = s.laws.fz615;
@@ -418,7 +329,7 @@
         body: {
           pollIntervalMin: Number($('#set-interval').value),
           onlyOpen: $('#set-onlyopen').checked,
-          searchContracts: $('#set-contracts').checked,
+          searchContracts: false,
           laws: { fz44: $('#set-fz44').checked, fz223: $('#set-fz223').checked, fz615: $('#set-fz615').checked },
         },
       });
@@ -594,7 +505,7 @@
       connectEvents();
       const view = location.hash.replace('#', '');
       if (['feed', 'watchlist', 'analytics', 'settings', 'log'].includes(view)) showView(view);
-      else if (!state.watchlist.companies.length && !state.watchlist.nomenclature.length) showView('watchlist');
+      else if (!state.watchlist.nomenclature.length) showView('watchlist');
     } catch (err) {
       toast(`Не удалось загрузить: ${err.message}`, 'err');
     }

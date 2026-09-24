@@ -54,25 +54,23 @@ test('mapContractItem вытаскивает поставщика и ИНН', ()
   assert.equal(t.stage, 'Исполнение');
 });
 
-test('buildQueries строит запросы по ролям и настройкам', () => {
+test('buildQueries строит только запросы по номенклатуре', () => {
   const queries = buildQueries({
     companies: [
       { inn: '6679104561', name: 'Старк', role: 'any' },
-      { inn: '7810577007', name: 'Теплосеть', role: 'customer' },
       { inn: '6679037273', name: 'ПЗПТ', role: 'supplier' },
     ],
     nomenclature: [{ keyword: 'труба', okpd2: '24.20.13' }, { keyword: '', okpd2: '25.99' }],
     settings: { onlyOpen: true, laws: { fz44: true, fz223: false, fz615: false }, searchContracts: true },
   });
-  const labels = queries.map((q) => q.label);
-  assert.equal(queries.length, 6, labels.join('\n'));
-  const starkNotice = queries.find((q) => q.kind === 'notices' && q.match.ref === '6679104561');
-  assert.ok(starkNotice.url.includes('searchString=6679104561'));
-  assert.ok(starkNotice.url.includes('fz44=on'));
-  assert.ok(!starkNotice.url.includes('fz223=on'));
-  assert.ok(starkNotice.url.includes('af=on') && !starkNotice.url.includes('pc=on'));
-  assert.ok(queries.some((q) => q.kind === 'contracts' && q.url.includes('supplierInn=6679037273')));
-  assert.ok(!queries.some((q) => q.kind === 'contracts' && q.match.ref === '7810577007'), 'для заказчика контракты не ищем');
+  assert.equal(queries.length, 2);
+  assert.ok(queries.every((q) => q.kind === 'notices' && q.match.type !== 'company'));
+  assert.ok(!queries.some((q) => q.url.includes('6679104561') || q.url.includes('supplierInn')));
+  const pipe = queries.find((q) => q.match.ref === 'труба');
+  assert.ok(pipe.url.includes('searchString='));
+  assert.ok(pipe.url.includes('fz44=on'));
+  assert.ok(!pipe.url.includes('fz223=on'));
+  assert.ok(pipe.url.includes('af=on') && !pipe.url.includes('pc=on'));
   const okpd = queries.find((q) => q.match.type === 'okpd2');
   assert.ok(okpd.url.includes('okpd2IdsCodes=25.99'));
 });
@@ -87,13 +85,14 @@ test('ZakupkiSource.collect работает с подменённым fetch и 
   const src = new ZakupkiSource({ base: 'https://zakupki.gov.ru', userAgent: 'test', delayMs: 0, fetchImpl, log: {} });
   const res = await src.collect({
     companies: [{ inn: '6679104561', name: 'Старк', role: 'any' }],
-    nomenclature: [],
+    nomenclature: [{ keyword: 'труба', okpd2: '' }],
     settings: { onlyOpen: true, laws: { fz44: true, fz223: true }, searchContracts: true },
   });
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 1, 'ИНН не порождает отдельных запросов');
+  assert.ok(calls[0].includes('searchString='));
+  assert.ok(!calls.some((url) => url.includes('6679104561') || url.includes('contract')));
   assert.equal(res.tenders.length, 2);
-  assert.equal(res.errors.length, 1);
-  assert.match(res.errors[0].message, /503/);
+  assert.equal(res.errors.length, 0);
 });
 
 test('утилиты: числа, даты, закон, морфология', () => {

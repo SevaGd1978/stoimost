@@ -52,8 +52,8 @@ export class Scheduler extends EventEmitter {
 
   async runOnce({ trigger = 'manual' } = {}) {
     if (this.running) return { skipped: true, reason: 'already-running' };
-    const { companies, nomenclature, settings } = this.store;
-    if (!companies.length && !nomenclature.length) {
+    const { nomenclature, settings } = this.store;
+    if (!nomenclature.length) {
       const run = {
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
@@ -61,7 +61,7 @@ export class Scheduler extends EventEmitter {
         queriesRun: 0,
         found: 0,
         added: 0,
-        errors: [{ query: '—', message: 'Список наблюдения пуст: добавьте ИНН или номенклатуру' }],
+        errors: [{ query: '—', message: 'Список наблюдения пуст: добавьте номенклатуру' }],
       };
       this.lastRun = run;
       this.store.addRun(run);
@@ -74,7 +74,7 @@ export class Scheduler extends EventEmitter {
     const startedAt = new Date().toISOString();
     let result = { tenders: [], errors: [], queriesRun: 0 };
     try {
-      result = await this.source.collect({ companies, nomenclature, settings });
+      result = await this.source.collect({ nomenclature, settings });
     } catch (err) {
       result.errors.push({ query: 'источник', message: err.message });
     }
