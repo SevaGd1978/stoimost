@@ -1,6 +1,17 @@
 import { EventEmitter } from 'node:events';
 
 /**
+ * ЕИС уже отобрал выдачу по НМЦК. Здесь отсекаем только карточки, чья цена
+ * известна и лежит вне диапазона; без распознанной цены карточку оставляем.
+ */
+function priceAllowed(price, { priceMin = null, priceMax = null } = {}) {
+  if (typeof price !== 'number' || !Number.isFinite(price)) return true;
+  if (priceMin != null && price < priceMin) return false;
+  if (priceMax != null && price > priceMax) return false;
+  return true;
+}
+
+/**
  * Один «опрос» = собрать карточки из источника по всему watchlist,
  * слить в хранилище, посчитать новые, разослать уведомления.
  * Планировщик запускает опросы по таймеру и по запросу из UI.
@@ -82,6 +93,7 @@ export class Scheduler extends EventEmitter {
     const added = [];
     for (const t of result.tenders) {
       if (settings.onlyOpen && t.kind === 'notice' && t.isOpen === false) continue;
+      if (!priceAllowed(t.price, settings)) continue;
       if (this.store.upsertTender(t)) added.push(this.store.tenders[t.id]);
     }
     const pruned = this.store.prune(this.retentionDays);

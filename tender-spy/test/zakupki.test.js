@@ -100,6 +100,18 @@ test('buildQueries строит только запросы по номенкл�
   assert.ok(okpd.url.includes('okpd2IdsCodes=25.99'));
 });
 
+test('buildQueries передаёт в ЕИС диапазон НМЦК', () => {
+  const [withPrice] = buildQueries({
+    nomenclature: [{ keyword: 'труба', okpd2: '' }],
+    settings: { laws: { fz44: true }, priceMin: 100000, priceMax: 2000000.5 },
+  });
+  const url = new URL(withPrice.url);
+  assert.equal(url.searchParams.get('priceFromGeneral'), '100000');
+  assert.equal(url.searchParams.get('priceToGeneral'), '2000001');
+  const [noPrice] = buildQueries({ nomenclature: [{ keyword: 'труба' }], settings: { laws: { fz44: true } } });
+  assert.ok(!noPrice.url.includes('priceFromGeneral') && !noPrice.url.includes('priceToGeneral'));
+});
+
 test('ZakupkiSource.collect работает с подменённым fetch и собирает ошибки', async () => {
   const calls = [];
   const fetchImpl = async (url) => {

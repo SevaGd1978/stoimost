@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { parsePriceBound } from './tenders.js';
 
 const DB_VERSION = 1;
 
@@ -11,6 +12,9 @@ export function defaultSettings() {
     laws: { fz44: true, fz223: true, fz615: false },
     searchContracts: true,
     notifyTelegram: false,
+    /** Диапазон НМЦК для запросов к ЕИС, ₽. null — без границы. */
+    priceMin: null,
+    priceMax: null,
   };
 }
 
@@ -353,6 +357,11 @@ export class Store {
       for (const k of ['fz44', 'fz223', 'fz615']) {
         if (typeof patch.laws[k] === 'boolean') s.laws[k] = patch.laws[k];
       }
+    }
+    if ('priceMin' in patch) s.priceMin = parsePriceBound(patch.priceMin);
+    if ('priceMax' in patch) s.priceMax = parsePriceBound(patch.priceMax);
+    if (s.priceMin != null && s.priceMax != null && s.priceMin > s.priceMax) {
+      [s.priceMin, s.priceMax] = [s.priceMax, s.priceMin];
     }
     this.scheduleSave();
     return s;

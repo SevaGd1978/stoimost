@@ -41,6 +41,8 @@ export const QUERY_TEMPLATES = {
     laws: { fz44: 'fz44', fz223: 'fz223', fz615: 'ppRf615' },
     searchString: 'searchString',
     okpd2: 'okpd2IdsCodes',
+    priceFrom: 'priceFromGeneral',
+    priceTo: 'priceToGeneral',
   },
   contracts: {
     path: '/epz/contract/search/rss.html',
@@ -94,6 +96,8 @@ export function buildQueries({ nomenclature = [], settings = {}, base = 'https:/
     };
     if (n.keyword) params[QUERY_TEMPLATES.notices.searchString] = n.keyword;
     if (n.okpd2) params[QUERY_TEMPLATES.notices.okpd2] = n.okpd2;
+    if (settings.priceMin != null) params[QUERY_TEMPLATES.notices.priceFrom] = Math.floor(settings.priceMin);
+    if (settings.priceMax != null) params[QUERY_TEMPLATES.notices.priceTo] = Math.ceil(settings.priceMax);
     queries.push({
       kind: 'notices',
       label: `Номенклатура · ${n.keyword || ''}${n.okpd2 ? ` [ОКПД2 ${n.okpd2}]` : ''}`.trim(),

@@ -356,6 +356,8 @@
     if (!s) return;
     $('#set-interval').value = s.pollIntervalMin;
     $('#set-onlyopen').checked = s.onlyOpen;
+    $('#set-price-min').value = s.priceMin != null ? fmtPrice(s.priceMin) : '';
+    $('#set-price-max').value = s.priceMax != null ? fmtPrice(s.priceMax) : '';
     $('#set-fz44').checked = s.laws.fz44;
     $('#set-fz223').checked = s.laws.fz223;
     $('#set-fz615').checked = s.laws.fz615;
@@ -372,6 +374,8 @@
         body: {
           pollIntervalMin: Number($('#set-interval').value),
           onlyOpen: $('#set-onlyopen').checked,
+          priceMin: $('#set-price-min').value.trim() || null,
+          priceMax: $('#set-price-max').value.trim() || null,
           searchContracts: false,
           laws: { fz44: $('#set-fz44').checked, fz223: $('#set-fz223').checked, fz615: $('#set-fz615').checked },
         },

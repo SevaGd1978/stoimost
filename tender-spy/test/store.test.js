@@ -97,6 +97,41 @@ test('Scheduler.runOnce: фильтрует закрытые при onlyOpen, с
   assert.equal(again.added, 0);
 });
 
+test('Настройка цены сохраняется и отсекает карточки вне диапазона', async () => {
+  const file = tmpFile();
+  const store = new Store(file);
+  store.addNomenclature({ keyword: 'труба' });
+  const s = store.updateSettings({ priceMin: '2 000 000', priceMax: '100 000' });
+  assert.equal(s.priceMin, 100000, 'границы переставлены');
+  assert.equal(s.priceMax, 2000000);
+  store.save();
+  assert.equal(new Store(file).settings.priceMax, 2000000);
+
+  const source = {
+    async collect() {
+      return {
+        tenders: [
+          sample('notice:low', { price: 5000 }),
+          sample('notice:mid', { price: 500000 }),
+          sample('notice:high', { price: 9000000 }),
+          sample('notice:unknown', { price: null }),
+        ],
+        errors: [],
+        queriesRun: 1,
+      };
+    },
+  };
+  const scheduler = new Scheduler({ store, source, notifier: null, log: { error() {}, warn() {} } });
+  const run = await scheduler.runOnce();
+  scheduler.stop();
+  assert.equal(run.added, 2);
+  assert.ok(store.tenders['notice:mid'] && store.tenders['notice:unknown']);
+  assert.ok(!store.tenders['notice:low'] && !store.tenders['notice:high']);
+
+  assert.equal(store.updateSettings({ priceMin: '', priceMax: null }).priceMin, null);
+  assert.equal(store.settings.priceMax, null);
+});
+
 test('Store: пакетный импорт компаний и номенклатуры, экспорт watchlist', () => {
   const store = new Store(tmpFile());
   const cRes = store.importCompanies([
