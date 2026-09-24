@@ -24,18 +24,25 @@ import { X509Certificate } from 'node:crypto';
 
 const certDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'certs');
 
-const CERT_FILES = ['russian-trusted-root-ca.pem', 'russian-trusted-sub-ca.pem'];
+const CERT_FILES = [
+  'russian-trusted-root-ca.pem',
+  'russian-trusted-sub-ca.pem',
+  // Серверы torgi.gov.ru и etprf.ru не присылают промежуточный сертификат,
+  // поэтому держим его сами. Оба выстраиваются до доверенного корня.
+  'russian-trusted-sub-ca-2024.pem',
+  'globalsign-gcc-r6-alphassl-ca-2025.pem',
+];
 
 const CAUSE_HINTS = {
-  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: 'нет доверия к сертификату ЕИС',
-  UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'не удалось проверить сертификат ЕИС',
+  UNABLE_TO_GET_ISSUER_CERT_LOCALLY: 'нет доверия к сертификату сайта',
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'не удалось проверить сертификат сайта',
   DEPTH_ZERO_SELF_SIGNED_CERT: 'сертификат без доверенного корня',
   ERR_TLS_CERT_ALTNAME_INVALID: 'имя в сертификате не совпадает с адресом',
   CERT_HAS_EXPIRED: 'срок сертификата истёк',
   ECONNRESET: 'соединение сброшено',
   ECONNREFUSED: 'соединение отклонено',
-  ENOTFOUND: 'адрес ЕИС не найден',
-  EAI_AGAIN: 'адрес ЕИС не найден',
+  ENOTFOUND: 'адрес сайта не найден',
+  EAI_AGAIN: 'адрес сайта не найден',
   ETIMEDOUT: 'таймаут соединения',
   UND_ERR_CONNECT_TIMEOUT: 'таймаут соединения',
   UND_ERR_HEADERS_TIMEOUT: 'таймаут ответа',
@@ -145,6 +152,7 @@ function rawRequest(url, opts, agent, timeoutMs) {
             status: res.statusCode,
             headers: res.headers,
             text: async () => body.toString('utf8'),
+            buffer: async () => body,
           });
         });
       },
@@ -164,7 +172,7 @@ function rawRequest(url, opts, agent, timeoutMs) {
       req.destroy(err);
     });
     req.on('error', fail);
-    req.end();
+    req.end(opts.body ?? undefined);
   });
 }
 
@@ -187,7 +195,10 @@ export function createEisFetch({ timeoutMs = 25000 } = {}) {
       if (next.protocol !== 'https:' && next.protocol !== 'http:') {
         throw new Error(`редирект на неподдерживаемую схему ${next.protocol}`);
       }
-      return eisFetch(next.toString(), opts, redirects + 1);
+      const follow = res.status === 303 || ((res.status === 301 || res.status === 302) && opts.method === 'POST')
+        ? { ...opts, method: 'GET', body: undefined }
+        : opts;
+      return eisFetch(next.toString(), follow, redirects + 1);
     }
     return res;
   }

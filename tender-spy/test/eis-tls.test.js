@@ -8,14 +8,21 @@ import path from 'node:path';
 import { X509Certificate } from 'node:crypto';
 import { createEisFetch, describeFetchError, extraCaLabels, loadExtraCas, trustedCas } from '../src/eis-tls.js';
 
-test('доверенные CA включают корень и промежуточный сертификат Минцифры', () => {
+test('доверенные CA включают корень Минцифры и промежуточные сертификаты площадок', () => {
   const extra = loadExtraCas();
-  assert.equal(extra.length, 2);
+  assert.equal(extra.length, 4);
   const subjects = extra.map((pem) => new X509Certificate(pem).subject);
   assert.ok(subjects.some((s) => s.includes('Russian Trusted Root CA')));
   assert.ok(subjects.some((s) => s.includes('Russian Trusted Sub CA')));
   const labels = extraCaLabels();
-  assert.deepEqual(labels, ['Russian Trusted Root CA', 'Russian Trusted Sub CA']);
+  assert.deepEqual(labels, [
+    'Russian Trusted Root CA',
+    'Russian Trusted Sub CA',
+    'Russian Trusted Sub CA',
+    'GlobalSign GCC R6 AlphaSSL CA 2025',
+  ]);
+  const fingerprints = new Set(extra.map((pem) => new X509Certificate(pem).fingerprint256));
+  assert.equal(fingerprints.size, 4);
   const trustedSubjects = trustedCas().map((pem) => new X509Certificate(pem).subject).join('\n');
   assert.match(trustedSubjects, /Russian Trusted Root CA/);
   assert.ok(trustedCas().length > extra.length);
@@ -28,7 +35,7 @@ test('describeFetchError показывает код причины, а не о�
   });
   const text = describeFetchError(err);
   assert.match(text, /UNABLE_TO_GET_ISSUER_CERT_LOCALLY/);
-  assert.match(text, /нет доверия к сертификату ЕИС/);
+  assert.match(text, /нет доверия к сертификату сайта/);
   assert.equal(describeFetchError(Object.assign(new Error('aborted'), { name: 'AbortError' })), 'таймаут');
 });
 
