@@ -1,0 +1,170 @@
+{
+ "content": [
+  {
+   "id": "21000021600000000117_3",
+   "noticeNumber": "21000021600000000117",
+   "lotNumber": 3,
+   "lotStatus": "APPLICATIONS_SUBMISSION",
+   "biddType": {
+    "code": "ZHKH",
+    "name": "Отбор региональных операторов по обращению с ТКО и управляющих организаций для управления МКД"
+   },
+   "biddForm": {
+    "code": "PK",
+    "name": "Конкурс"
+   },
+   "lotName": "Право заключения договора управления многоквартирным домом, расположенным по адресу: г. Трубчевск, ул.Андреева, д. 9",
+   "lotDescription": "Многоквартирный дом, расположенный по адресу: г. Трубчевск, ул.Андреева, д. 9",
+   "priceMin": 0.0,
+   "priceMinExact": "0.00",
+   "biddEndTime": "2026-10-15T21:00:00.000+00:00",
+   "lotImages": [],
+   "lotVideos": [],
+   "subjectRFCode": "32",
+   "category": {
+    "code": "902",
+    "name": "Управление многоквартирными домами"
+   },
+   "createDate": "2026-09-15T11:08:56.201+00:00",
+   "timeZoneName": "МСК",
+   "timezoneOffset": "180",
+   "hasAppeals": false,
+   "isStopped": false,
+   "isAnnulled": false,
+   "noticeFirstVersionPublicationDate": "2026-09-15T11:10:56.359Z",
+   "npaHintCode": "hint2_ZHKH_PK_1",
+   "typeTransaction": "trustManagement"
+  },
+  {
+   "id": "21000021600000000117_2",
+   "noticeNumber": "21000021600000000117",
+   "lotNumber": 2,
+   "lotStatus": "APPLICATIONS_SUBMISSION",
+   "biddType": {
+    "code": "ZHKH",
+    "name": "Отбор региональных операторов по обращению с ТКО и управляющих организаций для управления МКД"
+   },
+   "biddForm": {
+    "code": "PK",
+    "name": "Конкурс"
+   },
+   "lotName": "Право заключения договора управления многоквартирным домом, расположенным по адресу: г. Трубчевск, ул.Андреева, д. 3.",
+   "lotDescription": "Многоквартирный дом, расположенный по адресу: г. Трубчевск, ул.Андреева, д. 3.",
+   "priceMin": 0.0,
+   "priceMinExact": "0.00",
+   "biddEndTime": "2026-10-15T21:00:00.000+00:00",
+   "lotImages": [],
+   "lotVideos": [],
+   "subjectRFCode": "32",
+   "category": {
+    "code": "902",
+    "name": "Управление многоквартирными домами"
+   },
+   "createDate": "2026-09-15T11:08:56.201+00:00",
+   "timeZoneName": "МСК",
+   "timezoneOffset": "180",
+   "hasAppeals": false,
+   "isStopped": false,
+   "isAnnulled": false,
+   "noticeFirstVersionPublicationDate": "2026-09-15T11:10:56.359Z",
+   "npaHintCode": "hint2_ZHKH_PK_1",
+   "typeTransaction": "trustManagement"
+  },
+  {
+   "id": "21000021600000000117_1",
+   "noticeNumber": "21000021600000000117",
+   "lotNumber": 1,
+   "lotStatus": "APPLICATIONS_SUBMISSION",
+   "biddType": {
+    "code": "ZHKH",
+    "name": "Отбор региональных операторов по обращению с ТКО и управляющих организаций для управления МКД"
+   },
+   "biddForm": {
+    "code": "PK",
+    "name": "Конкурс"
+   },
+   "lotName": "Право заключения договора управления многоквартирным домом, расположенным по адресу: г. Трубчевск, ул.Андреева, д. 1.",
+   "lotDescription": "Многоквартирный дом, расположенный по адресу: г. Трубчевск, ул.Андреева, д. 1.",
+   "priceMin": 0.0,
+   "priceMinExact": "0.00",
+   "biddEndTime": "2026-10-15T21:00:00.000+00:00",
+   "lotImages": [],
+   "lotVideos": [],
+   "subjectRFCode": "32",
+   "category": {
+    "code": "902",
+    "name": "Управление многоквартирными домами"
+   },
+   "createDate": "2026-09-15T11:08:56.201+00:00",
+   "timeZoneName": "МСК",
+   "timezoneOffset": "180",
+   "hasAppeals": false,
+   "isStopped": false,
+   "isAnnulled": false,
+   "noticeFirstVersionPublicationDate": "2026-09-15T11:10:56.359Z",
+   "npaHintCode": "hint2_ZHKH_PK_1",
+   "typeTransaction": "trustManagement"
+  },
+  {
+   "id": "21000021600000000117_3",
+   "noticeNumber": "21000021600000000117",
+   "lotNumber": 3,
+   "lotStatus": "APPLICATIONS_SUBMISSION",
+   "biddType": {
+    "code": "ZHKH",
+    "name": "Отбор региональных операторов по обращению с ТКО и управляющих организаций для управления МКД"
+   },
+   "biddForm": {
+    "code": "PK",
+    "name": "Конкурс"
+   },
+   "lotName": "Право заключения договора управления многоквартирным домом, расположенным по адресу: г. Трубчевск, ул.Андреева, д. 9",
+   "lotDescription": "Многоквартирный дом, расположенный по адресу: г. Трубчевск, ул.Андреева, д. 9",
+   "priceMin": 0.0,
+   "priceMinExact": "0.00",
+   "biddEndTime": "2026-10-15T21:00:00.000+00:00",
+   "lotImages": [],
+   "lotVideos": [],
+   "subjectRFCode": "32",
+   "category": {
+    "code": "902",
+    "name": "Управление многоквартирными домами"
+   },
+   "createDate": "2026-09-15T11:08:56.201+00:00",
+   "timeZoneName": "МСК",
+   "timezoneOffset": "180",
+   "hasAppeals": false,
+   "isStopped": false,
+   "isAnnulled": false,
+   "noticeFirstVersionPublicationDate": "2026-09-15T11:10:56.359Z",
+   "npaHintCode": "hint2_ZHKH_PK_1",
+   "typeTransaction": "trustManagement"
+  }
+ ],
+ "pageable": {
+  "pageNumber": 0,
+  "pageSize": 10,
+  "sort": {
+   "unsorted": false,
+   "sorted": true,
+   "empty": false
+  },
+  "offset": 0,
+  "paged": true,
+  "unpaged": false
+ },
+ "categoryFacet": [],
+ "totalElements": 3559,
+ "totalPages": 356,
+ "last": false,
+ "first": true,
+ "numberOfElements": 10,
+ "size": 10,
+ "number": 0,
+ "sort": {
+  "unsorted": false,
+  "sorted": true,
+  "empty": false
+ },
+ "empty": false
+}

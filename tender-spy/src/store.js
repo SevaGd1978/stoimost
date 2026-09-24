@@ -2,8 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { parsePriceBound } from './tenders.js';
+import { PLATFORM_IDS } from './sources/platforms/index.js';
 
 const DB_VERSION = 1;
+
+export function defaultPlatforms() {
+  return Object.fromEntries(PLATFORM_IDS.map((id) => [id, true]));
+}
 
 export function defaultSettings() {
   return {
@@ -15,6 +20,8 @@ export function defaultSettings() {
     /** Диапазон НМЦК для запросов к ЕИС, ₽. null — без границы. */
     priceMin: null,
     priceMax: null,
+    /** Какие площадки опрашивать помимо ЕИС: { [id]: boolean }. */
+    platforms: defaultPlatforms(),
   };
 }
 
@@ -50,6 +57,7 @@ export class Store {
       const parsed = JSON.parse(raw);
       this.db = { ...emptyDb(), ...parsed };
       this.db.settings = { ...defaultSettings(), ...(parsed.settings || {}) };
+      this.db.settings.platforms = { ...defaultPlatforms(), ...(parsed.settings?.platforms || {}) };
       this.db.watchlist = {
         companies: parsed.watchlist?.companies ?? [],
         nomenclature: parsed.watchlist?.nomenclature ?? [],
@@ -267,6 +275,7 @@ export class Store {
     if (!existing) {
       this.tenders[tender.id] = {
         ...tender,
+        links: tender.links ?? (tender.url ? { [tender.source || 'zakupki']: tender.url } : {}),
         firstSeenAt: now,
         lastSeenAt: now,
         seen: false,
@@ -279,16 +288,35 @@ export class Store {
     for (const m of tender.matches) {
       if (!matchKeys.has(`${m.type}:${m.ref}`)) existing.matches.push(m);
     }
-    const stageChanged = existing.stage !== tender.stage;
+    existing.links = {
+      ...(existing.links ?? (existing.url ? { [existing.source || 'zakupki']: existing.url } : {})),
+      ...(tender.links ?? (tender.url ? { [tender.source || 'zakupki']: tender.url } : {})),
+    };
+    existing.lastSeenAt = now;
+
+    // Этап, статус и основную ссылку ведёт один источник: ЕИС, если карточка
+    // есть там, иначе площадка, которая нашла её первой. Остальные только
+    // дополняют пустые поля, иначе разные названия этапа («Подача заявок» /
+    // «Приём заявок») каждый опрос снова помечали бы карточку новой.
+    const primary = tender.source === (existing.source || 'zakupki') || tender.source === 'zakupki';
+    if (!primary) {
+      existing.customer ||= tender.customer;
+      existing.price ??= tender.price;
+      existing.deadlineAt ||= tender.deadlineAt;
+      existing.region ||= tender.region;
+      return false;
+    }
+    const stageChanged = Boolean(tender.stage) && existing.stage !== tender.stage;
     Object.assign(existing, {
+      source: tender.source || existing.source,
       title: tender.title || existing.title,
       customer: tender.customer || existing.customer,
       price: tender.price ?? existing.price,
       stage: tender.stage || existing.stage,
+      isOpen: tender.isOpen ?? existing.isOpen,
       deadlineAt: tender.deadlineAt || existing.deadlineAt,
       updatedAt: tender.updatedAt || existing.updatedAt,
       url: tender.url || existing.url,
-      lastSeenAt: now,
     });
     if (stageChanged) existing.seen = false;
     return false;
@@ -356,6 +384,12 @@ export class Store {
     if (patch.laws && typeof patch.laws === 'object') {
       for (const k of ['fz44', 'fz223', 'fz615']) {
         if (typeof patch.laws[k] === 'boolean') s.laws[k] = patch.laws[k];
+      }
+    }
+    if (patch.platforms && typeof patch.platforms === 'object') {
+      s.platforms = { ...defaultPlatforms(), ...(s.platforms || {}) };
+      for (const id of PLATFORM_IDS) {
+        if (typeof patch.platforms[id] === 'boolean') s.platforms[id] = patch.platforms[id];
       }
     }
     if ('priceMin' in patch) s.priceMin = parsePriceBound(patch.priceMin);

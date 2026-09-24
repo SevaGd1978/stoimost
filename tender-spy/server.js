@@ -5,6 +5,9 @@ import { Store } from './src/store.js';
 import { isValidInn, normalizeInn } from './src/inn.js';
 import { ZakupkiSource, buildQueries } from './src/sources/zakupki.js';
 import { DemoSource } from './src/sources/demo.js';
+import { CombinedSource } from './src/sources/combined.js';
+import { PlatformsSource, enabledPlatforms } from './src/sources/platforms/source.js';
+import { PLATFORMS, platformInfo } from './src/sources/platforms/index.js';
 import { TelegramNotifier } from './src/notify.js';
 import { Scheduler } from './src/scheduler.js';
 import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js';
@@ -29,14 +32,22 @@ const store = new Store(config.dataFile);
 const source =
   config.mode === 'demo'
     ? new DemoSource({ log })
-    : new ZakupkiSource({
-        base: config.zakupkiBase,
-        userAgent: config.userAgent,
-        timeoutMs: config.requestTimeoutMs,
-        delayMs: config.requestDelayMs,
-        dispatcher: proxyDispatcher,
-        log,
-      });
+    : new CombinedSource([
+        new ZakupkiSource({
+          base: config.zakupkiBase,
+          userAgent: config.userAgent,
+          timeoutMs: config.requestTimeoutMs,
+          delayMs: config.requestDelayMs,
+          dispatcher: proxyDispatcher,
+          log,
+        }),
+        new PlatformsSource({
+          userAgent: config.userAgent,
+          timeoutMs: config.requestTimeoutMs,
+          dispatcher: proxyDispatcher,
+          log,
+        }),
+      ]);
 
 const notifier = new TelegramNotifier({ token: config.telegram.token, chatId: config.telegram.chatId, log });
 const scheduler = new Scheduler({ store, source, notifier, retentionDays: config.retentionDays, log });
@@ -157,6 +168,7 @@ function analytics() {
 app.get('/api/state', (_req, res) => {
   res.json({
     mode: config.mode,
+    platforms: platformInfo(),
     settings: store.settings,
     watchlist: { companies: store.companies, nomenclature: store.nomenclature },
     status: scheduler.status,
@@ -177,6 +189,7 @@ function filterTenders(query) {
   const law = query.law;
   const company = query.company;
   const nomen = query.nomen;
+  const src = query.source;
   const onlyNew = query.onlyNew === '1';
   const onlyOpen = query.onlyOpen === '1';
   const favorite = query.favorite === '1';
@@ -190,13 +203,16 @@ function filterTenders(query) {
   if (law && law !== 'all') list = list.filter((t) => t.law === law);
   if (company) list = list.filter((t) => t.matches.some((m) => m.type === 'company' && m.ref === company));
   if (nomen) list = list.filter((t) => t.matches.some((m) => m.type !== 'company' && m.ref === nomen));
+  if (src && src !== 'all') list = list.filter((t) => (t.source || 'zakupki') === src || Boolean(t.links?.[src]));
   if (onlyNew) list = list.filter((t) => !t.seen);
   if (onlyOpen) list = list.filter((t) => t.kind === 'contract' || t.isOpen);
   if (favorite) list = list.filter((t) => t.favorite);
   if (minPrice != null || maxPrice != null) list = list.filter((t) => priceInRange(t.price, minPrice, maxPrice));
   if (q) {
     list = list.filter((t) =>
-      keywordMatches(q, `${t.title} ${t.customer ?? ''} ${t.supplier ?? ''} ${t.number}`) || t.number.includes(q),
+      keywordMatches(q, `${t.title} ${t.customer ?? ''} ${t.supplier ?? ''} ${t.number}`) ||
+      t.number.includes(q) ||
+      Boolean(t.platformNumber?.includes(q)),
     );
   }
 
@@ -221,7 +237,9 @@ app.get('/api/tenders', (req, res) => {
 app.get('/api/tenders.csv', (req, res) => {
   const list = filterTenders(req.query);
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Поставщик', 'Цена', 'Этап', 'Размещено', 'Окончание подачи', 'Причина', 'Ссылка'];
+  const names = Object.fromEntries([['zakupki', 'ЕИС'], ...PLATFORMS.map((p) => [p.id, p.name])]);
+  const sourcesOf = (t) => Object.keys(t.links && Object.keys(t.links).length ? t.links : { [t.source || 'zakupki']: 1 }).map((id) => names[id] || id).join(', ');
+  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Поставщик', 'Цена', 'Этап', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Ссылка'];
   const rows = list.map((t) =>
     [
       t.kind === 'contract' ? 'Контракт' : 'Извещение',
@@ -235,6 +253,7 @@ app.get('/api/tenders.csv', (req, res) => {
       t.publishedAt ? t.publishedAt.slice(0, 10) : '',
       t.deadlineAt ? t.deadlineAt.slice(0, 10) : '',
       t.matches.map((m) => (m.type === 'company' ? `ИНН ${m.ref} ${m.label}` : m.label)).join('; '),
+      sourcesOf(t),
       t.url,
     ]
       .map(esc)
@@ -401,14 +420,20 @@ app.post('/api/scan', async (_req, res) => {
 app.get('/api/runs', (_req, res) => res.json(store.runs));
 
 app.get('/api/queries', (_req, res) => {
-  res.json(
-    buildQueries({
-      companies: store.companies,
-      nomenclature: store.nomenclature,
-      settings: store.settings,
-      base: config.zakupkiBase,
-    }).map(({ kind, label, url }) => ({ kind, label, url })),
+  const eis = buildQueries({
+    nomenclature: store.nomenclature,
+    settings: store.settings,
+    base: config.zakupkiBase,
+  }).map(({ kind, label, url }) => ({ kind, label, url }));
+  if (config.mode === 'demo') return res.json(eis);
+  const keywords = [...new Set(store.nomenclature.map((n) => String(n.keyword ?? '').trim()).filter(Boolean))];
+  const platforms = enabledPlatforms(store.settings, PLATFORMS).flatMap((p) =>
+    keywords.map((keyword) => {
+      const req = p.request({ keyword, settings: store.settings });
+      return { kind: 'platform', label: `${p.name} · ${keyword}`, url: req.method === 'POST' ? `POST ${req.url}` : req.url };
+    }),
   );
+  res.json([...eis, ...platforms]);
 });
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Нет такого метода' }));

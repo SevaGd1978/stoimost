@@ -95,6 +95,7 @@
             <option value="223">223-ФЗ</option>
             <option value="615">615-ПП</option>
           </select>
+          <select class="input" id="f-source"><option value="all">Все площадки</option></select>
           <input class="input price-input" id="f-min" inputmode="decimal" placeholder="Цена от, ₽" autocomplete="off" />
           <input class="input price-input" id="f-max" inputmode="decimal" placeholder="Цена до, ₽" autocomplete="off" />
           <select class="input" id="f-sort">
@@ -123,7 +124,7 @@
         <header class="view-head">
           <div>
             <h1>Список наблюдения</h1>
-            <p class="muted">Что искать в ЕИС: ключевые слова и коды ОКПД2</p>
+            <p class="muted">Что искать в ЕИС и на площадках: ключевые слова и коды ОКПД2</p>
           </div>
           <div class="head-actions">
             <button class="btn btn-ghost" id="btn-export-wl">📤 Экспорт JSON</button>
@@ -149,7 +150,7 @@
             </form>
             <div class="items" id="nomen-list"></div>
             <details class="details">
-              <summary>Какие запросы уйдут в ЕИС</summary>
+              <summary>Какие запросы уйдут в ЕИС и на площадки</summary>
               <div id="queries-preview" class="queries"></div>
             </details>
           </div>
@@ -239,7 +240,7 @@
             </div>
             <label class="switch"><input type="checkbox" id="set-onlyopen" /> Только закупки на этапе подачи заявок</label>
             <div class="card-title mt">💰 Цена закупки (НМЦК)</div>
-            <p class="muted small">Уходит в запрос к ЕИС: закупки дешевле или дороже в выдачу не попадут. Пусто — без ограничения.</p>
+            <p class="muted small">Уходит в запрос к ЕИС и к площадкам, где есть такой фильтр; у остальных лишнее отсекается по цене карточки. Закупки без указанной цены не отбрасываются. Пусто — без ограничения.</p>
             <div class="form-row">
               <div class="field grow">
                 <label>от, ₽</label>
@@ -254,6 +255,9 @@
             <label class="switch"><input type="checkbox" id="set-fz44" /> 44-ФЗ (госзакупки)</label>
             <label class="switch"><input type="checkbox" id="set-fz223" /> 223-ФЗ (госкомпании, естественные монополии)</label>
             <label class="switch"><input type="checkbox" id="set-fz615" /> 615-ПП (капремонт МКД)</label>
+            <div class="card-title mt">🏛 Площадки</div>
+            <p class="muted small">ЕИС опрашивается всегда. Здесь — дополнительные открытые площадки, поиск по ключевым словам номенклатуры (позиции только с ОКПД2 на площадки не уходят).</p>
+            <div id="set-platforms"></div>
             <button class="btn btn-primary mt" id="btn-save-settings">💾 Сохранить</button>
           </div>
           <div class="card">

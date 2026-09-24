@@ -35,7 +35,12 @@ export class Scheduler extends EventEmitter {
       running: this.running,
       nextRunAt: this.nextRunAt,
       lastRun: this.lastRun,
-      source: this.source.constructor.name === 'DemoSource' ? 'demo' : 'zakupki',
+      source:
+        this.source.constructor.name === 'DemoSource'
+          ? 'demo'
+          : this.source.constructor.name === 'CombinedSource'
+            ? 'zakupki+platforms'
+            : 'zakupki',
       telegram: this.notifier?.enabled ?? false,
     };
   }

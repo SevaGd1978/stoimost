@@ -8,6 +8,7 @@
   const state = {
     mode: 'live',
     settings: null,
+    platforms: [],
     watchlist: { companies: [], nomenclature: [] },
     status: null,
     stats: null,
@@ -59,7 +60,7 @@
   // ---------- state ----------
   async function loadState() {
     const s = await api('/api/state');
-    Object.assign(state, { mode: s.mode, settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun });
+    Object.assign(state, { mode: s.mode, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun });
     renderStatus();
     renderWatchlist();
     renderSettings();
@@ -68,7 +69,8 @@
 
   function renderStatus() {
     const { status, stats, mode } = state;
-    $('#st-mode').textContent = mode === 'demo' ? 'демо (без сети)' : 'ЕИС (live)';
+    const enabled = state.platforms.filter((p) => state.settings?.platforms?.[p.id] !== false).length;
+    $('#st-mode').textContent = mode === 'demo' ? 'демо (без сети)' : `ЕИС + площадок: ${enabled} (live)`;
     $('#st-last').textContent = state.lastRun ? fmtDateTime(state.lastRun.finishedAt) : '—';
     $('#st-next').textContent = status?.nextRunAt ? fmtDateTime(status.nextRunAt) : '—';
     $('#st-tg').textContent = status?.telegram ? (state.settings?.notifyTelegram ? 'вкл' : 'настроен, выкл') : 'не настроен';
@@ -85,7 +87,7 @@
     $('#source-note').textContent =
       mode === 'demo'
         ? 'Сервер запущен в демо-режиме: карточки сгенерированы локально и лишь имитируют выдачу ЕИС. Запустите без флага --demo для реальных данных.'
-        : 'Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru) по ключевым словам и кодам ОКПД2. Поиск по ИНН не выполняется.';
+        : `Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru) по ключевым словам и кодам ОКПД2, а также из открытых реестров площадок: ${state.platforms.map((p) => p.name).join(', ')}. Площадки ищут только по ключевым словам. Извещение, найденное и в ЕИС, и на площадке, показывается одной карточкой. Поиск по ИНН не выполняется.`;
   }
 
   // ---------- лента ----------
@@ -97,6 +99,7 @@
     if (nomen) p.set('nomen', nomen);
     p.set('kind', $('#f-kind').value);
     p.set('law', $('#f-law').value);
+    p.set('source', $('#f-source').value);
     p.set('sort', $('#f-sort').value);
     const minPrice = $('#f-min').value.trim();
     const maxPrice = $('#f-max').value.trim();
@@ -123,6 +126,19 @@
     return `<span class="why ${m.type === 'company' ? 'company' : ''} ${m.strong === false ? 'weak' : ''}" title="${m.strong === false ? 'Совпадение по выдаче ЕИС, в тексте карточки не подтверждено' : 'Подтверждено в тексте карточки'}">${esc(label)}</span>`;
   }
 
+  function sourceName(id) {
+    if (!id || id === 'zakupki') return 'ЕИС';
+    return state.platforms.find((p) => p.id === id)?.name || id;
+  }
+
+  function sourceTags(t) {
+    const links = t.links && Object.keys(t.links).length ? t.links : { [t.source || 'zakupki']: t.url };
+    const ids = Object.keys(links).sort((a, b) => (a === 'zakupki' ? -1 : b === 'zakupki' ? 1 : 0));
+    return ids
+      .map((id) => `<a class="tag src" href="${esc(links[id])}" target="_blank" rel="noopener" title="Открыть на площадке">${esc(sourceName(id))}</a>`)
+      .join('');
+  }
+
   function renderTender(t) {
     const left = daysLeft(t.deadlineAt);
     const dlClass = left == null ? '' : left < 0 ? 'over' : left <= 3 ? 'soon' : '';
@@ -134,8 +150,11 @@
             ${t.seen ? '' : '<span class="tag new">новое</span>'}
             <span class="tag kind-${t.kind}">${t.kind === 'contract' ? 'контракт' : 'извещение'}</span>
             ${t.law !== 'other' ? `<span class="tag law-${t.law}">${t.law}-${t.law === '615' ? 'ПП' : 'ФЗ'}</span>` : ''}
-            <span class="tag ${t.isOpen ? 'stage-open' : 'stage-closed'}">${esc(t.stage || '')}</span>
+            ${t.category === 'sale' ? '<span class="tag sale" title="Продажа или аренда имущества, а не закупка">продажа имущества</span>' : ''}
+            ${t.stage ? `<span class="tag ${t.isOpen ? 'stage-open' : 'stage-closed'}">${esc(t.stage)}</span>` : ''}
+            ${sourceTags(t)}
             <span>№ ${esc(t.number)}</span>
+            ${t.platformNumber ? `<span>· на площадке ${esc(t.platformNumber)}</span>` : ''}
             ${t.method ? `<span>· ${esc(t.method)}</span>` : ''}
             <span>· размещено ${fmtDate(t.publishedAt)}</span>
           </div>
@@ -196,7 +215,7 @@
     feedTimer = setTimeout(() => loadFeed().catch((e) => toast(e.message, 'err')), 200);
   };
   ['#f-q', '#f-min', '#f-max'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
-  ['#f-nomen', '#f-kind', '#f-law', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch'].forEach((s) => $(s).addEventListener('change', debouncedFeed));
+  ['#f-nomen', '#f-kind', '#f-law', '#f-source', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch'].forEach((s) => $(s).addEventListener('change', debouncedFeed));
 
   $('#btn-mark-seen').addEventListener('click', async () => {
     const r = await api('/api/tenders/mark-all-seen', { method: 'POST' });
@@ -209,6 +228,12 @@
     const curN = ns.value;
     ns.innerHTML = '<option value="">Вся номенклатура</option>' + state.watchlist.nomenclature.map((n) => `<option value="${esc(n.keyword || n.okpd2)}">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</option>`).join('');
     ns.value = curN;
+    const ss = $('#f-source');
+    const curS = ss.value;
+    ss.innerHTML =
+      '<option value="all">Все площадки</option><option value="zakupki">ЕИС</option>' +
+      state.platforms.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    ss.value = [...ss.options].some((o) => o.value === curS) ? curS : 'all';
   }
 
   // ---------- наблюдение ----------
@@ -361,6 +386,12 @@
     $('#set-fz44').checked = s.laws.fz44;
     $('#set-fz223').checked = s.laws.fz223;
     $('#set-fz615').checked = s.laws.fz615;
+    $('#set-platforms').innerHTML = state.platforms
+      .map(
+        (p) => `<label class="switch"><input type="checkbox" data-platform="${esc(p.id)}" ${s.platforms?.[p.id] !== false ? 'checked' : ''} />
+          ${esc(p.name)} <span class="hint">${esc(new URL(p.site).hostname.replace(/^www\./, ''))}${p.category === 'sale' ? ' · продажа имущества' : ''}</span></label>`,
+      )
+      .join('');
     $('#set-telegram').checked = s.notifyTelegram;
     $('#set-telegram').disabled = !state.status?.telegram;
     $('#tg-hint').textContent = state.status?.telegram ? '' : '(токен не задан)';
@@ -378,6 +409,7 @@
           priceMax: $('#set-price-max').value.trim() || null,
           searchContracts: false,
           laws: { fz44: $('#set-fz44').checked, fz223: $('#set-fz223').checked, fz615: $('#set-fz615').checked },
+          platforms: Object.fromEntries($$('#set-platforms input[data-platform]').map((el) => [el.dataset.platform, el.checked])),
         },
       });
       toast('Настройки сохранены', 'ok');
