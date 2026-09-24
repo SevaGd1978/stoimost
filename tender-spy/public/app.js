@@ -98,6 +98,10 @@
     p.set('kind', $('#f-kind').value);
     p.set('law', $('#f-law').value);
     p.set('sort', $('#f-sort').value);
+    const minPrice = $('#f-min').value.trim();
+    const maxPrice = $('#f-max').value.trim();
+    if (minPrice) p.set('minPrice', minPrice);
+    if (maxPrice) p.set('maxPrice', maxPrice);
     if ($('#f-new').checked) p.set('onlyNew', '1');
     if ($('#f-open').checked) p.set('onlyOpen', '1');
     if ($('#f-fav').checked) p.set('favorite', '1');
@@ -191,7 +195,7 @@
     clearTimeout(feedTimer);
     feedTimer = setTimeout(() => loadFeed().catch((e) => toast(e.message, 'err')), 200);
   };
-  ['#f-q'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
+  ['#f-q', '#f-min', '#f-max'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
   ['#f-nomen', '#f-kind', '#f-law', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch'].forEach((s) => $(s).addEventListener('change', debouncedFeed));
 
   $('#btn-mark-seen').addEventListener('click', async () => {

@@ -13,6 +13,26 @@ export function parseRuNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Нижняя или верхняя граница цены из строки фильтра. Пустая и нечисловая строка — без границы. */
+export function parsePriceBound(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const n = parseRuNumber(value);
+  if (n == null || n < 0) return null;
+  return n;
+}
+
+/**
+ * Попадает ли цена в диапазон. Если задана хотя бы одна граница,
+ * карточка без числовой цены в выборку не входит.
+ */
+export function priceInRange(price, min, max) {
+  if (min == null && max == null) return true;
+  if (typeof price !== 'number' || !Number.isFinite(price)) return false;
+  if (min != null && price < min) return false;
+  if (max != null && price > max) return false;
+  return true;
+}
+
 /** «21.09.2026», «21.09.2026 14:30» или RFC-дата → ISO-строка (либо null). */
 export function parseRuDate(value) {
   if (!value) return null;

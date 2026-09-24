@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRss, parseDescriptionFields, pickField } from '../src/rss.js';
 import { buildQueries, mapNoticeItem, mapContractItem, ZakupkiSource } from '../src/sources/zakupki.js';
-import { keywordMatches, parseRuNumber, parseRuDate, detectLaw } from '../src/tenders.js';
+import { keywordMatches, parseRuNumber, parseRuDate, detectLaw, parsePriceBound, priceInRange } from '../src/tenders.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => fs.readFileSync(path.join(here, 'fixtures', name), 'utf8');
@@ -124,6 +124,14 @@ test('утилиты: числа, даты, закон, морфология', (
   assert.equal(parseRuNumber('1 234 567,89'), 1234567.89);
   assert.equal(parseRuNumber('98 000 000,00 ₽'), 98000000);
   assert.equal(parseRuNumber(''), null);
+  assert.equal(parsePriceBound('1 500 000'), 1500000);
+  assert.equal(parsePriceBound(''), null);
+  assert.equal(parsePriceBound('нет'), null);
+  assert.equal(priceInRange(200, 100, 300), true);
+  assert.equal(priceInRange(50, 100, null), false);
+  assert.equal(priceInRange(null, null, 100), false);
+  assert.equal(priceInRange(null, null, null), true);
+  assert.equal(priceInRange(0, 0, 10), true);
   assert.equal(parseRuDate('21.09.2026 09:15').slice(0, 13), '2026-09-21T06');
   assert.equal(detectLaw({ url: '', number: '32615000123' }), '223');
   assert.equal(detectLaw({ url: '', number: '0172200002526000123' }), '44');

@@ -7,7 +7,7 @@ import { ZakupkiSource, buildQueries } from './src/sources/zakupki.js';
 import { DemoSource } from './src/sources/demo.js';
 import { TelegramNotifier } from './src/notify.js';
 import { Scheduler } from './src/scheduler.js';
-import { keywordMatches } from './src/tenders.js';
+import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js';
 import { extraCaLabels } from './src/eis-tls.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 
@@ -181,8 +181,9 @@ function filterTenders(query) {
   const onlyOpen = query.onlyOpen === '1';
   const favorite = query.favorite === '1';
   const archived = query.archived === '1';
-  const minPrice = Number(query.minPrice) || null;
-  const maxPrice = Number(query.maxPrice) || null;
+  let minPrice = parsePriceBound(query.minPrice);
+  let maxPrice = parsePriceBound(query.maxPrice);
+  if (minPrice != null && maxPrice != null && minPrice > maxPrice) [minPrice, maxPrice] = [maxPrice, minPrice];
 
   let list = Object.values(store.tenders).filter((t) => Boolean(t.archived) === archived);
   if (kind && kind !== 'all') list = list.filter((t) => t.kind === kind);
@@ -192,8 +193,7 @@ function filterTenders(query) {
   if (onlyNew) list = list.filter((t) => !t.seen);
   if (onlyOpen) list = list.filter((t) => t.kind === 'contract' || t.isOpen);
   if (favorite) list = list.filter((t) => t.favorite);
-  if (minPrice) list = list.filter((t) => (t.price ?? 0) >= minPrice);
-  if (maxPrice) list = list.filter((t) => (t.price ?? Infinity) <= maxPrice);
+  if (minPrice != null || maxPrice != null) list = list.filter((t) => priceInRange(t.price, minPrice, maxPrice));
   if (q) {
     list = list.filter((t) =>
       keywordMatches(q, `${t.title} ${t.customer ?? ''} ${t.supplier ?? ''} ${t.number}`) || t.number.includes(q),
