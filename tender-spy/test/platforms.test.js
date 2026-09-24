@@ -114,6 +114,20 @@ test('toTender: номер ЕИС даёт общий id с карточкой �
   const own = toTender(byId.etprf, { number: 'EX1', title: 'Трубы', url: 'https://y' }, 'труба');
   assert.equal(own.id, 'etprf:EX1');
   assert.equal(own.law, 'other');
+  const stale = toTender(byId.roseltorg, { number: 'SP1', title: 'Труба', url: 'https://z', stage: 'Прием заявок', isOpen: true, deadlineAt: '2025-11-24T13:22:00.000Z' }, 'труба');
+  assert.equal(stale.isOpen, false);
+  assert.equal(stale.stage, 'Приём заявок завершён');
+});
+
+test('PlatformsSource: одна процедура дважды в выдаче — одна карточка', async () => {
+  const twice = { ...byId.etprf, parse: () => [
+    { number: 'EX1', title: 'Труба', url: 'https://a', price: null },
+    { number: 'EX1', title: 'Труба', url: 'https://a', price: 10 },
+  ] };
+  const source = new PlatformsSource({ platforms: [twice], delayMs: 0, retryDelayMs: 0, log: {}, fetchImpl: fakeFetch({ 'web.etprf.ru': 'x' }) });
+  const res = await source.collect({ nomenclature: [{ keyword: 'труба' }], settings: {} });
+  assert.equal(res.tenders.length, 1);
+  assert.equal(res.tenders[0].price, 10);
 });
 
 test('enabledPlatforms учитывает выключенные площадки', () => {
@@ -135,6 +149,7 @@ test('PlatformsSource: фильтр по ключевому слову, зако
   const source = new PlatformsSource({
     platforms: [byId.roseltorg, byId.etprf, byId.rad],
     delayMs: 0,
+    retryDelayMs: 0,
     log: {},
     fetchImpl: fakeFetch({
       'www.roseltorg.ru': fixture('roseltorg'),
@@ -158,11 +173,12 @@ test('PlatformsSource: фильтр по ключевому слову, зако
   assert.ok(!no44.tenders.some((t) => t.law === '44'));
 });
 
-test('PlatformsSource: после двух сетевых сбоев подряд площадка пропускается', async () => {
+test('PlatformsSource: сетевой сбой повторяется, после двух подряд площадка пропускается', async () => {
   let calls = 0;
   const source = new PlatformsSource({
     platforms: [byId.etprf],
     delayMs: 0,
+    retryDelayMs: 0,
     log: {},
     fetchImpl: async () => {
       calls++;
@@ -170,7 +186,7 @@ test('PlatformsSource: после двух сетевых сбоев подря�
     },
   });
   const res = await source.collect({ nomenclature: ['а', 'б', 'в', 'г'].map((keyword) => ({ keyword })), settings: {} });
-  assert.equal(calls, 2);
+  assert.equal(calls, 4);
   assert.match(res.errors.at(-1).message, /пропущено запросов: 2/);
 });
 
@@ -190,7 +206,7 @@ test('CombinedSource + Store: извещение из ЕИС и с площад�
   };
   const combined = new CombinedSource([
     { collect: async () => ({ tenders: [eisCard], errors: [], queriesRun: 1 }) },
-    new PlatformsSource({ platforms: [byId.roseltorg], delayMs: 0, log: {}, fetchImpl: fakeFetch({ 'www.roseltorg.ru': fixture('roseltorg') }) }),
+    new PlatformsSource({ platforms: [byId.roseltorg], delayMs: 0, retryDelayMs: 0, log: {}, fetchImpl: fakeFetch({ 'www.roseltorg.ru': fixture('roseltorg') }) }),
     { collect: async () => { throw new Error('упал'); } },
   ]);
   const res = await combined.collect({ nomenclature: [{ keyword: 'труба' }], settings: {} });

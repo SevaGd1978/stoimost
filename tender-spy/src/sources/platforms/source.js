@@ -42,6 +42,9 @@ export function toTender(platform, item, keyword) {
   const eisNumber = item.eisNumber && isEisNumber(item.eisNumber) ? item.eisNumber : null;
   const number = eisNumber || String(item.number);
   const title = item.title || `Процедура № ${number}`;
+  // Площадки не всегда вовремя меняют статус: срок подачи прошёл — приём закрыт.
+  const expired = item.deadlineAt ? Date.parse(item.deadlineAt) < Date.now() : false;
+  const isOpen = expired ? false : (item.isOpen ?? null);
   return {
     id: eisNumber ? `notice:${eisNumber}` : `${platform.id}:${item.number}`,
     source: platform.id,
@@ -61,8 +64,8 @@ export function toTender(platform, item, keyword) {
     publishedAt: item.publishedAt || null,
     updatedAt: item.publishedAt || null,
     deadlineAt: item.deadlineAt || null,
-    stage: item.stage || (item.isOpen === false ? 'Приём заявок завершён' : item.isOpen ? 'Приём заявок' : ''),
-    isOpen: item.isOpen ?? null,
+    stage: expired ? 'Приём заявок завершён' : item.stage || (isOpen === false ? 'Приём заявок завершён' : isOpen ? 'Приём заявок' : ''),
+    isOpen,
     region: item.region || null,
     url: item.url,
     links: item.url ? { [platform.id]: item.url } : {},
@@ -71,11 +74,12 @@ export function toTender(platform, item, keyword) {
 }
 
 export class PlatformsSource {
-  constructor({ platforms = PLATFORMS, userAgent, timeoutMs = 25000, delayMs = 1000, fetchImpl, dispatcher, log = console } = {}) {
+  constructor({ platforms = PLATFORMS, userAgent, timeoutMs = 25000, delayMs = 1000, retryDelayMs = 2000, fetchImpl, dispatcher, log = console } = {}) {
     this.platforms = platforms;
     this.userAgent = userAgent;
     this.timeoutMs = timeoutMs;
     this.delayMs = delayMs;
+    this.retryDelayMs = retryDelayMs;
     this.fetchImpl = fetchImpl ?? (dispatcher ? fetch : createEisFetch({ timeoutMs }));
     this.dispatcher = dispatcher;
     this.log = log;
@@ -105,13 +109,28 @@ export class PlatformsSource {
     }
   }
 
+  async fetchWithRetry(req) {
+    try {
+      return await this.fetchBody(req);
+    } catch (err) {
+      if (!NETWORK_ERROR.test(describeFetchError(err))) throw err;
+      await sleep(this.retryDelayMs);
+      return this.fetchBody(req);
+    }
+  }
+
   async search(platform, keyword, settings) {
-    const body = await this.fetchBody(platform.request({ keyword, settings }));
+    const body = await this.fetchWithRetry(platform.request({ keyword, settings }));
     const items = platform.parse(body);
-    return items
-      .filter((it) => it && it.title && keywordMatches(keyword, it.title))
-      .map((it) => toTender(platform, it, keyword))
-      .filter((t) => lawAllowed(t.law, settings.laws));
+    const unique = new Map();
+    for (const it of items) {
+      if (!it?.title || !keywordMatches(keyword, it.title)) continue;
+      const t = toTender(platform, it, keyword);
+      if (!lawAllowed(t.law, settings.laws)) continue;
+      const prev = unique.get(t.id);
+      if (!prev || (prev.price == null && t.price != null)) unique.set(t.id, t);
+    }
+    return [...unique.values()];
   }
 
   async collectPlatform(platform, keywords, settings) {

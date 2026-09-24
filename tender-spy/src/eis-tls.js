@@ -187,8 +187,17 @@ export function createEisFetch({ timeoutMs = 25000 } = {}) {
     rejectUnauthorized: true,
     maxSockets: 4,
   });
+  async function send(url, opts) {
+    try {
+      return await rawRequest(url, opts, agent, timeoutMs);
+    } catch (err) {
+      // Сервер мог закрыть простаивавшее keep-alive соединение — повторяем один раз на новом.
+      if (err?.code !== 'ECONNRESET' || opts.signal?.aborted) throw err;
+      return rawRequest(url, opts, agent, timeoutMs);
+    }
+  }
   async function eisFetch(url, opts = {}, redirects = 0) {
-    const res = await rawRequest(url, opts, agent, timeoutMs);
+    const res = await send(url, opts);
     const location = res.headers.location;
     if (location && [301, 302, 303, 307, 308].includes(res.status) && redirects < 5) {
       const next = new URL(location, url);

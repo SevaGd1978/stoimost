@@ -65,3 +65,26 @@ test('клиент ЕИС не отключает проверку TLS', async (
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('клиент повторяет запрос один раз, если сервер оборвал соединение', async () => {
+  const net = await import('node:net');
+  let connections = 0;
+  const server = net.createServer((sock) => {
+    connections++;
+    if (connections === 1) {
+      sock.once('data', () => sock.destroy());
+      return;
+    }
+    sock.once('data', () => sock.end('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok'));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  try {
+    const res = await createEisFetch({ timeoutMs: 4000 })(`http://127.0.0.1:${port}/`);
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), 'ok');
+    assert.equal(connections, 2);
+  } finally {
+    server.close();
+  }
+});
