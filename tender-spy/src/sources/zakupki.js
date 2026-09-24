@@ -228,7 +228,15 @@ export class ZakupkiSource {
 
   async runQuery(query) {
     const xml = await this.fetchXml(query.url);
+    const head = String(xml).slice(0, 240).replace(/\s+/g, ' ').trim();
+    const looksRss = /<(rss|feed|item)\b/i.test(String(xml).slice(0, 4000));
+    if (!looksRss) {
+      throw new Error(`ЕИС вернул не RSS (${String(xml).length} байт): ${head.slice(0, 180) || 'пустой ответ'}`);
+    }
     const items = parseRss(xml);
+    if (!items.length) {
+      this.log.info?.(`[zakupki] ${query.label}: пустая лента, ${String(xml).length} байт, начало: ${head.slice(0, 300) || 'пусто'}`);
+    }
     const mapper = query.kind === 'contracts' ? mapContractItem : mapNoticeItem;
     return items.map((it) => mapper(it, query)).filter(Boolean);
   }
