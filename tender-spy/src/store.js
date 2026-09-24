@@ -5,6 +5,7 @@ import { parsePriceBound } from './tenders.js';
 import { PLATFORM_IDS } from './sources/platforms/index.js';
 
 const DB_VERSION = 1;
+const REMOVED_SALE_SOURCES = new Set(['torgi', 'rad']);
 
 export function defaultPlatforms() {
   return Object.fromEntries(PLATFORM_IDS.map((id) => [id, true]));
@@ -57,7 +58,9 @@ export class Store {
       const parsed = JSON.parse(raw);
       this.db = { ...emptyDb(), ...parsed };
       this.db.settings = { ...defaultSettings(), ...(parsed.settings || {}) };
-      this.db.settings.platforms = { ...defaultPlatforms(), ...(parsed.settings?.platforms || {}) };
+      const saved = parsed.settings?.platforms || {};
+      this.db.settings.platforms = Object.fromEntries(PLATFORM_IDS.map((id) => [id, saved[id] !== false]));
+      this.dropPropertySales();
       this.db.watchlist = {
         companies: parsed.watchlist?.companies ?? [],
         nomenclature: parsed.watchlist?.nomenclature ?? [],
@@ -341,6 +344,19 @@ export class Store {
     }
     this.scheduleSave();
     return n;
+  }
+
+  /** Продажа имущества в мониторинг не входит: убираем такие карточки, кроме избранных. */
+  dropPropertySales() {
+    let removed = 0;
+    for (const [id, t] of Object.entries(this.tenders)) {
+      const sale = t.category === 'sale' || REMOVED_SALE_SOURCES.has(t.source);
+      if (sale && !t.favorite) {
+        delete this.tenders[id];
+        removed++;
+      }
+    }
+    return removed;
   }
 
   /** Удаляет тендеры, которые давно не встречались в выборках и не отмечены избранными. */

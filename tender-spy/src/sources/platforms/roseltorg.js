@@ -45,6 +45,7 @@ export default {
         const stage = htmlText(statusText).replace(/\s*\d+\s*дн\.?$/, '').trim();
         const customerBlock = (item.match(/class="search-results__customer">([\s\S]*?)<\/p>/) || [])[1] || '';
         const customer = htmlText((customerBlock.match(/<a[^>]*>([\s\S]*?)<\/a>/) || [])[1] || '');
+        const section = htmlText((item.match(/class="search-results__section">[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/) || [])[1] || '');
         const inn = (customerBlock.match(/\/companies\/resolve\/(\d{10,12})\//) || decodeHtml(customerBlock).match(/ИНН\s*(\d{10,12})/) || [])[1] || null;
         return {
           number: lot && lot !== '1' ? `${number}-${lot}` : number,
@@ -58,6 +59,7 @@ export default {
           isOpen: stage ? /при[её]м заявок/i.test(stage) : null,
           method: htmlText((item.match(/<p class="search-results__type">([\s\S]*?)<\/p>/) || [])[1] || '') || null,
           region: htmlText(block(item, 'search-results__region')) || null,
+          category: /имуществ|продаж|реализац|приватизац/i.test(section) ? 'sale' : 'purchase',
           url: firstHref(subject, BASE),
         };
       })

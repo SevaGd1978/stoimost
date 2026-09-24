@@ -132,7 +132,6 @@ select.input { appearance: none; }
 .tag.stage-closed { color: var(--muted); }
 .tag.src { color: #b9c7ff; border-color: rgba(185, 199, 255, 0.35); text-decoration: none; }
 .tag.src:hover { border-color: #b9c7ff; }
-.tag.sale { color: #ffb3b3; border-color: rgba(255, 179, 179, 0.35); }
 .tender-title { font-size: 15px; font-weight: 600; margin: 2px 0; }
 .tender-title a { color: var(--text); text-decoration: none; }
 .tender-title a:hover { color: var(--accent-2); text-decoration: underline; }

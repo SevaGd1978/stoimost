@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLATFORMS, PLATFORM_IDS } from '../src/sources/platforms/index.js';
-import { PlatformsSource, enabledPlatforms, toTender } from '../src/sources/platforms/source.js';
+import { PlatformsSource, enabledPlatforms, isSale, toTender } from '../src/sources/platforms/source.js';
 import { CombinedSource } from '../src/sources/combined.js';
 import { parseMoney, parseRuDateTime } from '../src/sources/platforms/util.js';
 import { Store, defaultSettings } from '../src/store.js';
@@ -17,12 +17,13 @@ const fixture = (id) => {
   return fs.readFileSync(path.join(fixtures, file), 'utf8');
 };
 
-test('подключено 10 площадок с уникальными id и фикстурами', () => {
-  assert.equal(PLATFORMS.length, 10);
-  assert.equal(new Set(PLATFORM_IDS).size, 10);
+test('подключено 8 площадок закупок с уникальными id и фикстурами', () => {
+  assert.equal(PLATFORMS.length, 8);
+  assert.equal(new Set(PLATFORM_IDS).size, 8);
+  assert.ok(!PLATFORM_IDS.includes('torgi') && !PLATFORM_IDS.includes('rad'));
   for (const p of PLATFORMS) {
     assert.ok(p.name && p.site.startsWith('https://'), p.id);
-    assert.ok(['purchase', 'sale'].includes(p.category), p.id);
+    assert.equal(p.category, 'purchase', p.id);
     assert.ok(fixture(p.id).length > 100, p.id);
   }
   assert.ok(Object.values(defaultSettings().platforms).every(Boolean));
@@ -49,8 +50,6 @@ const EXPECT = {
   zakazrf: { number: '32616400926', eis: true, price: 13120, customer: /Джалильское/ },
   etprf: { number: 'EX26082100001', price: 414544.53, customer: /КАМЕНСК/ },
   avtodor: { number: 'AVT28082600003', price: 8231711.32, customer: /АВТОДОР/ },
-  torgi: { number: '21000021600000000117-3', open: true },
-  rad: { number: '68046B1-4001-46-1', price: 977653.2, open: true },
 };
 
 for (const [id, exp] of Object.entries(EXPECT)) {
@@ -71,14 +70,20 @@ for (const [id, exp] of Object.entries(EXPECT)) {
   });
 }
 
-test('ГИС Торги: дубли лотов в выдаче убираются', () => {
-  const items = byId.torgi.parse(fixture('torgi'));
-  assert.equal(new Set(items.map((i) => i.number)).size, items.length);
-});
-
-test('ТЭК-Торг: продажа имущества помечается категорией sale', () => {
+test('ТЭК-Торг: разделы продаж помечаются категорией sale', () => {
   const items = byId.tektorg.parse(fixture('tektorg'));
   assert.equal(items.find((i) => i.number === 'ПИ607046').category, 'sale');
+  assert.equal(items.find((i) => i.number === 'ЗП6092135').category, 'purchase');
+});
+
+test('isSale: раздел продаж, способ и формулировка предмета', () => {
+  assert.equal(isSale({ category: 'sale', title: 'Труба' }), true);
+  assert.equal(isSale({ title: 'Труба', method: 'Аукцион по продаже имущества' }), true);
+  assert.equal(isSale({ title: 'Филиал АО «РУСАЛ Урал» реализует трубу ППУ' }), true);
+  assert.equal(isSale({ title: 'Продажа металлолома (б/у трубы)' }), true);
+  assert.equal(isSale({ title: 'Филиaл АO «РУCАЛ Уpал» pеализуeт трубу' }), true, 'латинские двойники букв');
+  assert.equal(isSale({ title: 'Поставка труб ППУ', method: 'Запрос котировок' }), false);
+  assert.equal(isSale({ title: 'Выполнение работ по реализации проекта теплосети' }), false);
 });
 
 test('request(): ключевое слово, «только открытые» и диапазон цены', () => {
@@ -131,9 +136,9 @@ test('PlatformsSource: одна процедура дважды в выдаче 
 });
 
 test('enabledPlatforms учитывает выключенные площадки', () => {
-  const ids = enabledPlatforms({ platforms: { rad: false, torgi: false } }).map((p) => p.id);
-  assert.equal(ids.length, 8);
-  assert.ok(!ids.includes('rad'));
+  const ids = enabledPlatforms({ platforms: { avtodor: false, etprf: false } }).map((p) => p.id);
+  assert.equal(ids.length, 6);
+  assert.ok(!ids.includes('avtodor'));
 });
 
 function fakeFetch(map) {
@@ -147,14 +152,14 @@ function fakeFetch(map) {
 
 test('PlatformsSource: фильтр по ключевому слову, законам и ошибки по площадкам', async () => {
   const source = new PlatformsSource({
-    platforms: [byId.roseltorg, byId.etprf, byId.rad],
+    platforms: [byId.roseltorg, byId.etprf, byId.tektorg],
     delayMs: 0,
     retryDelayMs: 0,
     log: {},
     fetchImpl: fakeFetch({
       'www.roseltorg.ru': fixture('roseltorg'),
       'web.etprf.ru': Object.assign(new Error('connect'), { code: 'ECONNREFUSED' }),
-      'lot-online.ru': fixture('rad'),
+      'www.tektorg.ru': fixture('tektorg'),
     }),
   });
   const res = await source.collect({
@@ -164,7 +169,8 @@ test('PlatformsSource: фильтр по ключевому слову, зако
   assert.equal(res.queriesRun, 3);
   assert.ok(res.tenders.every((t) => /труб/i.test(t.title)));
   assert.ok(res.tenders.some((t) => t.id === 'notice:0328300032826000776'));
-  assert.ok(res.tenders.some((t) => t.source === 'rad' && t.category === 'sale'));
+  assert.ok(res.tenders.some((t) => t.source === 'tektorg'));
+  assert.ok(!res.tenders.some((t) => t.category === 'sale' || /реализ/i.test(t.title)), 'продажи имущества отсеяны');
   assert.equal(res.errors.length, 1);
   assert.match(res.errors[0].query, /ЭТП РФ · труба/);
   assert.match(res.errors[0].message, /ECONNREFUSED/);
@@ -229,8 +235,26 @@ test('CombinedSource + Store: извещение из ЕИС и с площад�
 
 test('Store.updateSettings: включение и выключение площадок', () => {
   const store = new Store(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-plat-')), 'db.json'));
-  const s = store.updateSettings({ platforms: { rad: false, unknown: true, torgi: 'нет' } });
-  assert.equal(s.platforms.rad, false);
-  assert.equal(s.platforms.torgi, true);
+  const s = store.updateSettings({ platforms: { avtodor: false, unknown: true, etprf: 'нет' } });
+  assert.equal(s.platforms.avtodor, false);
+  assert.equal(s.platforms.etprf, true);
   assert.ok(!('unknown' in s.platforms));
+});
+
+test('Store при загрузке убирает сохранённые продажи имущества и удалённые площадки', () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ts-plat-')), 'db.json');
+  const card = (id, extra) => ({ id, source: 'tektorg', kind: 'notice', number: id, title: 'Труба', matches: [], ...extra });
+  fs.writeFileSync(file, JSON.stringify({
+    settings: { platforms: { torgi: true, rad: true, tektorg: false } },
+    tenders: {
+      a: card('a', { category: 'sale' }),
+      b: card('b', { source: 'torgi' }),
+      c: card('c', { category: 'purchase' }),
+      d: card('d', { category: 'sale', favorite: true }),
+    },
+  }));
+  const store = new Store(file);
+  assert.deepEqual(Object.keys(store.tenders).sort(), ['c', 'd']);
+  assert.ok(!('torgi' in store.settings.platforms) && !('rad' in store.settings.platforms));
+  assert.equal(store.settings.platforms.tektorg, false);
 });

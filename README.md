@@ -12,7 +12,7 @@
 
 ## Tender Spy
 
-В папке [`tender-spy/`](tender-spy/README.md) — отдельное приложение для мониторинга тендеров ЕИС (44-ФЗ/223-ФЗ) и 10 электронных площадок по номенклатуре. Запуск: `cd tender-spy && npm install && npm start`.
+В папке [`tender-spy/`](tender-spy/README.md) — отдельное приложение для мониторинга тендеров ЕИС (44-ФЗ/223-ФЗ) и 8 электронных площадок по номенклатуре. Запуск: `cd tender-spy && npm install && npm start`.
 
 Готово к развертыванию на [Amvera Cloud](https://amvera.ru) (в корне подготовлены `amvera.yml` и `Dockerfile`).
 

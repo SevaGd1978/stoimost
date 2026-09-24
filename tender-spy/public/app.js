@@ -87,7 +87,7 @@
     $('#source-note').textContent =
       mode === 'demo'
         ? 'Сервер запущен в демо-режиме: карточки сгенерированы локально и лишь имитируют выдачу ЕИС. Запустите без флага --demo для реальных данных.'
-        : `Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru) по ключевым словам и кодам ОКПД2, а также из открытых реестров площадок: ${state.platforms.map((p) => p.name).join(', ')}. Площадки ищут только по ключевым словам. Извещение, найденное и в ЕИС, и на площадке, показывается одной карточкой. Поиск по ИНН не выполняется.`;
+        : `Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru) по ключевым словам и кодам ОКПД2, а также из открытых реестров площадок: ${state.platforms.map((p) => p.name).join(', ')}. Площадки ищут только по ключевым словам, продажа имущества в выдачу не попадает. Извещение, найденное и в ЕИС, и на площадке, показывается одной карточкой. Поиск по ИНН не выполняется.`;
   }
 
   // ---------- лента ----------
@@ -150,7 +150,6 @@
             ${t.seen ? '' : '<span class="tag new">новое</span>'}
             <span class="tag kind-${t.kind}">${t.kind === 'contract' ? 'контракт' : 'извещение'}</span>
             ${t.law !== 'other' ? `<span class="tag law-${t.law}">${t.law}-${t.law === '615' ? 'ПП' : 'ФЗ'}</span>` : ''}
-            ${t.category === 'sale' ? '<span class="tag sale" title="Продажа или аренда имущества, а не закупка">продажа имущества</span>' : ''}
             ${t.stage ? `<span class="tag ${t.isOpen ? 'stage-open' : 'stage-closed'}">${esc(t.stage)}</span>` : ''}
             ${sourceTags(t)}
             <span>№ ${esc(t.number)}</span>
@@ -389,7 +388,7 @@
     $('#set-platforms').innerHTML = state.platforms
       .map(
         (p) => `<label class="switch"><input type="checkbox" data-platform="${esc(p.id)}" ${s.platforms?.[p.id] !== false ? 'checked' : ''} />
-          ${esc(p.name)} <span class="hint">${esc(new URL(p.site).hostname.replace(/^www\./, ''))}${p.category === 'sale' ? ' · продажа имущества' : ''}</span></label>`,
+          ${esc(p.name)} <span class="hint">${esc(new URL(p.site).hostname.replace(/^www\./, ''))}</span></label>`,
       )
       .join('');
     $('#set-telegram').checked = s.notifyTelegram;

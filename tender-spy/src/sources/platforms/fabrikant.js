@@ -67,6 +67,7 @@ export default {
         const organizer = card.match(new RegExp(`"children":"Организатор"\\}\\],\\["\\$","\\$L[0-9a-z]+",null,\\{"name":${JSON_STR}`));
         const deadlineAt = parseRuDateTime(labelled(card, 'Дата окончания при[её]ма заявок'));
         const price = card.match(/"children":\["([\d\s\u00a0.,]+)","\$L/);
+        const direction = (card.match(/"procedure_direction":"(\w+)"/) || [])[1];
         return {
           number,
           eisNumber: oos,
@@ -79,6 +80,7 @@ export default {
           isOpen: stage ? /при[её]м заявок/i.test(stage) : openByDeadline(deadlineAt),
           method: num ? num[1] : null,
           law,
+          category: direction && direction !== 'buy' ? 'sale' : 'purchase',
           url: unescapeJson(link[1]),
         };
       })

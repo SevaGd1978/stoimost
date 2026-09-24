@@ -32,6 +32,29 @@ function lawAllowed(law, laws) {
   return true;
 }
 
+const SALE_METHOD = /продаж|реализац|приватизац|аукцион на повышение|имуществ/i;
+// \b в JS не видит границ кириллических слов, поэтому границы заданы явно.
+const SALE_TITLE = /^\s*(продажа|реализация|приватизация)(?![а-яё])|(?<![а-яё])(реализу(ет|ем|ются)|предлагаем к (продаже|реализации))(?![а-яё])/i;
+
+/**
+ * Продажа имущества вместо закупки: площадка отметила раздел продаж
+ * или это видно по способу процедуры и формулировке предмета.
+ */
+export function isSale(item) {
+  if (item.category === 'sale') return true;
+  return SALE_METHOD.test(cyrillicLookalikes(item.method)) || SALE_TITLE.test(cyrillicLookalikes(item.title));
+}
+
+// Продавцы иногда пишут часть букв латиницей («pеализуeт»), чтобы обойти фильтры.
+const LOOKALIKES = { a: 'а', c: 'с', e: 'е', o: 'о', p: 'р', x: 'х', y: 'у', k: 'к', m: 'м', t: 'т', h: 'н', b: 'в' };
+
+function cyrillicLookalikes(text) {
+  return String(text ?? '').replace(/[aceopxykmthb]/gi, (ch) => {
+    const low = LOOKALIKES[ch.toLowerCase()];
+    return ch === ch.toLowerCase() ? low : low.toUpperCase();
+  });
+}
+
 export function enabledPlatforms(settings = {}, platforms = PLATFORMS) {
   const flags = settings.platforms ?? {};
   return platforms.filter((p) => flags[p.id] !== false);
@@ -124,7 +147,7 @@ export class PlatformsSource {
     const items = platform.parse(body);
     const unique = new Map();
     for (const it of items) {
-      if (!it?.title || !keywordMatches(keyword, it.title)) continue;
+      if (!it?.title || !keywordMatches(keyword, it.title) || isSale(it)) continue;
       const t = toTender(platform, it, keyword);
       if (!lawAllowed(t.law, settings.laws)) continue;
       const prev = unique.get(t.id);
