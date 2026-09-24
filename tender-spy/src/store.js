@@ -179,8 +179,10 @@ export class Store {
   /**
    * Пакетный импорт номенклатуры.
    * items: массив { keyword, okpd2 }
+   * replace: очистить текущую номенклатуру перед добавлением.
    */
-  importNomenclature(items = []) {
+  importNomenclature(items = [], { replace = false } = {}) {
+    if (replace) this.db.watchlist.nomenclature = [];
     let added = 0;
     let skipped = 0;
     for (const item of items) {
@@ -202,7 +204,7 @@ export class Store {
         added++;
       }
     }
-    if (added) this.scheduleSave();
+    if (added || replace) this.scheduleSave();
     return { added, skipped, total: this.nomenclature.length };
   }
 

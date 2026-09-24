@@ -13,10 +13,17 @@
   <!-- Модальное окно импорта Watchlist -->
   <div class="modal-backdrop" id="modal-import" hidden>
     <div class="modal-box">
-      <div class="card-title">Импорт списка наблюдения (JSON)</div>
-      <p class="muted small">Вставьте JSON-структуру или экспортированный файл со списком компаний и номенклатуры:</p>
-      <textarea class="input" id="import-json-input" rows="8" placeholder='{ "companies": [...], "nomenclature": [...] }'></textarea>
-      <label class="switch mt-sm"><input type="checkbox" id="import-replace" /> Заменить текущий список полностью (вместо объединения)</label>
+      <div class="card-title">Импорт номенклатуры</div>
+      <p class="muted small">Файл CSV, TXT, JSON или Excel (.xlsx). В таблице — колонки «Ключевые слова» и «ОКПД2». Без заголовка каждая строка считается отдельной позицией. Подойдёт UTF-8 и Windows-1251.</p>
+      <div class="file-row mt-sm">
+        <label class="btn btn-ghost">Выбрать файл
+          <input type="file" id="import-file" accept=".csv,.txt,.tsv,.json,.xlsx,text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        </label>
+        <span class="muted small" id="import-file-name">Файл не выбран</span>
+      </div>
+      <p class="muted small mt-sm">Или вставьте JSON:</p>
+      <textarea class="input" id="import-json-input" rows="6" placeholder='[{"keyword":"труба","okpd2":"24.20.13"}]'></textarea>
+      <label class="switch mt-sm"><input type="checkbox" id="import-replace" /> Заменить текущую номенклатуру</label>
       <div class="form-row mt">
         <button class="btn btn-primary" id="btn-import-confirm">Применить импорт</button>
         <button class="btn btn-ghost" id="btn-import-close">Закрыть</button>
@@ -118,7 +125,7 @@
           </div>
           <div class="head-actions">
             <button class="btn btn-ghost" id="btn-export-wl">📤 Экспорт JSON</button>
-            <button class="btn btn-ghost" id="btn-import-wl">📥 Импорт JSON</button>
+            <button class="btn btn-ghost" id="btn-import-wl">📥 Импорт файла</button>
           </div>
         </header>
 

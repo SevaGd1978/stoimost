@@ -242,24 +242,63 @@
     }
   });
 
+  function bytesToBase64(bytes) {
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    return btoa(bin);
+  }
+
+  function resetImportFile() {
+    const input = $('#import-file');
+    if (input) input.value = '';
+    const name = $('#import-file-name');
+    if (name) name.textContent = 'Файл не выбран';
+  }
+
+  $('#import-file')?.addEventListener('change', () => {
+    const file = $('#import-file').files[0];
+    $('#import-file-name').textContent = file ? file.name : 'Файл не выбран';
+  });
+
   $('#btn-import-wl').addEventListener('click', () => {
     $('#modal-import').hidden = false;
   });
   $('#btn-import-close').addEventListener('click', () => {
     $('#modal-import').hidden = true;
+    resetImportFile();
   });
   $('#btn-import-confirm').addEventListener('click', async () => {
+    const file = $('#import-file')?.files?.[0];
+    const replace = $('#import-replace').checked;
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) return toast('Файл больше 2 МБ', 'err');
+      try {
+        const data = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+        const res = await api('/api/nomenclature/import', { method: 'POST', body: { filename: file.name, data, replace } });
+        const invalid = res.invalid?.length ? `, не разобрано строк: ${res.invalid.length}` : '';
+        toast(`Добавлено позиций: ${res.added}, уже были: ${res.skipped}${invalid}`, 'ok');
+        $('#modal-import').hidden = true;
+        $('#import-json-input').value = '';
+        resetImportFile();
+        await loadState();
+        loadQueries();
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+      return;
+    }
     const raw = $('#import-json-input').value.trim();
-    if (!raw) return toast('Вставьте JSON', 'err');
+    if (!raw) return toast('Выберите файл или вставьте JSON', 'err');
     let parsed;
     try {
       parsed = JSON.parse(raw);
     } catch (e) {
       return toast(`Невалидный JSON: ${e.message}`, 'err');
     }
-    const replace = $('#import-replace').checked;
     try {
-      const res = await api('/api/watchlist/import', { method: 'POST', body: { ...parsed, replace } });
+      const payload = Array.isArray(parsed) ? { nomenclature: parsed } : parsed;
+      const res = await api('/api/watchlist/import', { method: 'POST', body: { ...payload, replace } });
       toast(`Импортировано позиций номенклатуры: ${res.nomenclature?.added || 0}`, 'ok');
       $('#modal-import').hidden = true;
       $('#import-json-input').value = '';

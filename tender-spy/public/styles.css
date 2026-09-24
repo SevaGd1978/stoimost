@@ -212,6 +212,8 @@ select.input { appearance: none; }
   padding: 24px; width: 90%; max-width: 580px; box-shadow: var(--shadow);
 }
 .modal-box textarea { font-family: monospace; resize: vertical; }
+.file-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.file-row input[type="file"] { display: none; }
 
 @media (max-width: 1000px) {
   .layout { grid-template-columns: 1fr; }

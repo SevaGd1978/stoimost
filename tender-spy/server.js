@@ -9,6 +9,7 @@ import { TelegramNotifier } from './src/notify.js';
 import { Scheduler } from './src/scheduler.js';
 import { keywordMatches } from './src/tenders.js';
 import { extraCaLabels } from './src/eis-tls.js';
+import { parseNomenclatureFile } from './src/nomenclature-file.js';
 
 let proxyDispatcher = undefined;
 if (config.proxy && typeof fetch === 'function') {
@@ -41,7 +42,7 @@ const notifier = new TelegramNotifier({ token: config.telegram.token, chatId: co
 const scheduler = new Scheduler({ store, source, notifier, retentionDays: config.retentionDays, log });
 
 const app = express();
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '3mb' }));
 
 // Health check для мониторинга облачных платформ (Amvera, k8s, docker)
 app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
@@ -312,6 +313,34 @@ app.post('/api/nomenclature', (req, res) => {
 
 app.delete('/api/nomenclature/:id', (req, res) => {
   res.json({ removed: store.removeNomenclature(req.params.id) });
+});
+
+app.post('/api/nomenclature/import', (req, res) => {
+  const filename = String(req.body?.filename ?? 'nomenclature.csv');
+  const data = req.body?.data;
+  if (typeof data !== 'string' || !data.trim()) return res.status(400).json({ error: 'Файл не передан' });
+  let buffer;
+  try {
+    buffer = Buffer.from(data, 'base64');
+  } catch {
+    return res.status(400).json({ error: 'Не удалось прочитать файл' });
+  }
+  if (!buffer.length) return res.status(400).json({ error: 'Файл пустой' });
+  if (buffer.length > 2 * 1024 * 1024) return res.status(400).json({ error: 'Файл больше 2 МБ' });
+  try {
+    const parsed = parseNomenclatureFile(filename, buffer);
+    if (!parsed.items.length) {
+      const why = parsed.invalid[0]?.reason;
+      return res.status(400).json({
+        error: why ? `Нет позиций для импорта: строка ${parsed.invalid[0].line}: ${why}` : 'В файле нет позиций номенклатуры',
+        invalid: parsed.invalid,
+      });
+    }
+    const result = store.importNomenclature(parsed.items, { replace: Boolean(req.body?.replace) });
+    res.json({ ...result, invalid: parsed.invalid });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Не удалось разобрать файл' });
+  }
 });
 
 // ---- watchlist: импорт/экспорт ----------------------------------------------
