@@ -235,7 +235,12 @@ export class ZakupkiSource {
     }
     const items = parseRss(xml);
     if (!items.length) {
-      this.log.info?.(`[zakupki] ${query.label}: пустая лента, ${String(xml).length} байт, начало: ${head.slice(0, 300) || 'пусто'}`);
+      const raw = String(xml);
+      const itemTags = (raw.match(/<item\b/gi) || []).length;
+      const at = raw.slice(500, 900).replace(/\s+/g, ' ');
+      this.log.info?.(
+        `[zakupki] ${query.label}: пусто, байт=${raw.length}, item=${itemTags}, срез=${at.slice(0, 280) || 'пусто'}`,
+      );
     }
     const mapper = query.kind === 'contracts' ? mapContractItem : mapNoticeItem;
     return items.map((it) => mapper(it, query)).filter(Boolean);
