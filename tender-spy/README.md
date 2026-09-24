@@ -14,13 +14,25 @@
 ```bash
 cd tender-spy
 npm install
-npm start            # http://localhost:3100 — реальные данные ЕИС
+npm start            # http://localhost:3000 — реальные данные ЕИС
 npm run demo         # демо-режим: карточки генерируются локально, без сети
 ```
 
 С переменными из файла: `cp .env.example .env`, затем `npm run start:env`.
 
 Требуется Node.js ≥ 18 (для `start:env` — ≥ 20.6).
+
+### Развертывание в облаке Amvera (amvera.ru)
+
+В корне репозитория подготовлены конфигурационные файлы `amvera.yml` и `Dockerfile`:
+- Среда: Node.js 20.
+- Порт: 3000 (по умолчанию).
+- Постоянное хранилище: `/data` (база автоматически монтируется по пути `/data/db.json` при наличии переменной `AMVERA` или `TENDER_SPY_DATA=/data/db.json`).
+- Для развертывания:
+  1. Создайте приложение в Amvera.
+  2. Добавьте remote: `git remote add amvera https://git.amvera.ru/<username>/<app-name>`.
+  3. Отправьте ветку: `git push amvera <ваша-ветка>:master`.
+  4. В панели Amvera задайте необходимые переменные (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TENDER_SPY_POLL_MIN`).
 
 ## Как пользоваться
 
@@ -79,6 +91,7 @@ data/db.json              — база (создаётся автоматиче�
 
 | Метод | Путь | Назначение |
 |---|---|---|
+| GET | `/health` | проверка здоровья сервиса для систем мониторинга / облаков |
 | GET | `/api/state` | настройки, watchlist, статус планировщика, счётчики, краткая аналитика |
 | GET | `/api/analytics` | сводная аналитика: суммы НМЦК, распределение по законам, этапам, топ заказчиков и поставщиков |
 | GET | `/api/tenders?q=&company=&nomen=&kind=&law=&onlyNew=1&onlyOpen=1&favorite=1&archived=1&sort=` | лента |

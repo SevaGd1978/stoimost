@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,10 +12,21 @@ function envInt(name, fallback) {
   return Number.isFinite(v) && v > 0 ? v : fallback;
 }
 
+function defaultDataFile() {
+  if (process.env.TENDER_SPY_DATA) return process.env.TENDER_SPY_DATA;
+  // Amvera монтирует постоянное хранилище в /data (run.persistenceMount).
+  try {
+    if (fs.existsSync('/data') && fs.statSync('/data').isDirectory()) return '/data/db.json';
+  } catch {
+    /* локальный запуск без /data */
+  }
+  return path.join(rootDir, 'data', 'db.json');
+}
+
 export const config = {
   rootDir,
-  port: envInt('PORT', 3100),
-  dataFile: process.env.TENDER_SPY_DATA || path.join(rootDir, 'data', 'db.json'),
+  port: envInt('PORT', 3000),
+  dataFile: defaultDataFile(),
   /** demo — встроенные примеры без выхода в сеть; live — запросы к ЕИС */
   mode: argv.has('--demo') || process.env.TENDER_SPY_MODE === 'demo' ? 'demo' : 'live',
   /** Интервал автоопроса источников, минут */
@@ -26,11 +38,11 @@ export const config = {
     process.env.TENDER_SPY_USER_AGENT ||
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
   zakupkiBase: process.env.TENDER_SPY_ZAKUPKI_BASE || 'https://zakupki.gov.ru',
-    proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.TENDER_SPY_PROXY || '',
-    telegram: {
-      token: process.env.TELEGRAM_BOT_TOKEN || '',
-      chatId: process.env.TELEGRAM_CHAT_ID || '',
-    },
+  proxy: process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.TENDER_SPY_PROXY || '',
+  telegram: {
+    token: process.env.TELEGRAM_BOT_TOKEN || '',
+    chatId: process.env.TELEGRAM_CHAT_ID || '',
+  },
   /** Сколько дней хранить тендеры, которые больше не попадают в выборку */
   retentionDays: envInt('TENDER_SPY_RETENTION_DAYS', 90),
 };

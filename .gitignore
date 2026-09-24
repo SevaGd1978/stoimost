@@ -6,3 +6,5 @@ node_modules/
 tender-spy/data/*.json
 tender-spy/data/*.tmp
 tender-spy/.env
+.env
+

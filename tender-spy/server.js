@@ -41,6 +41,10 @@ const scheduler = new Scheduler({ store, source, notifier, retentionDays: config
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+
+// Health check для мониторинга облачных платформ (Amvera, k8s, docker)
+app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
 app.use(express.static(path.join(config.rootDir, 'public'), { extensions: ['html'] }));
 
 // ---- SSE: живые события для интерфейса --------------------------------------
@@ -384,7 +388,7 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message || 'Внутренняя ошибка' });
 });
 
-const server = app.listen(config.port, () => {
+const server = app.listen(config.port, '0.0.0.0', () => {
   log.info(`Tender Spy → http://localhost:${config.port}  (режим: ${config.mode}, источник: ${scheduler.status.source}, интервал: ${store.settings.pollIntervalMin} мин)`);
   scheduler.start();
 });

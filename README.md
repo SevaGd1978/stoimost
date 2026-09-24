@@ -14,6 +14,24 @@
 
 В папке [`tender-spy/`](tender-spy/README.md) — отдельное приложение для мониторинга тендеров ЕИС (44-ФЗ/223-ФЗ) по ИНН предприятий и номенклатуре. Запуск: `cd tender-spy && npm install && npm start`.
 
+Готово к развертыванию на [Amvera Cloud](https://amvera.ru) (в корне подготовлены `amvera.yml` и `Dockerfile`).
+
+## Развертывание на Amvera.io (Amvera Cloud)
+
+Приложение полностью адаптировано для деплоя на российском облаке **Amvera**:
+1. Создайте проект в личном кабинете [amvera.ru](https://amvera.ru) (тип: «Приложение», репозиторий: Git Amvera или подключение GitHub).
+2. Если используется Git Amvera, привяжите remote и отправьте код:
+   ```bash
+   git remote add amvera https://git.amvera.ru/<ваш-логин>/<имя-проекта>
+   git push amvera main:master
+   ```
+3. Во вкладке **«Переменные»** проекта в Amvera можно настроить:
+   - `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` — для мгновенных уведомлений о закупках;
+   - `TENDER_SPY_POLL_MIN` — интервал автоматического опроса в минутах (по умолчанию 30);
+   - `HTTPS_PROXY` — если требуется опрос через определенный прокси;
+   - `TENDER_SPY_MODE` — `live` (по умолчанию, реальные запросы к ЕИС) или `demo`.
+4. База данных автоматически сохраняется в постоянное хранилище Amvera (`/data/db.json`), поэтому список наблюдения и найденные закупки не теряются при пересборках.
+
 ## Возможности
 
 - Авторасчёт топлива по цене и расходу (л/100 км)
@@ -47,12 +65,11 @@ scripts/build.js — сборка
 ## Запуск локально
 
 ```bash
-npm start
+npm start              # калькулятор → http://localhost:3000
+npm run start:tender-spy   # мониторинг тендеров → http://localhost:3000
 ```
 
-Откроется http://localhost:3000
-
-Без Node.js можно открыть `index.html` или `dist/index.html` в браузере.
+Калькулятор открывается на http://localhost:3000. Без Node.js можно открыть `index.html` или `dist/index.html` в браузере.
 
 ## Сборка
 
