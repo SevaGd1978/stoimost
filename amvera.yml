@@ -9,6 +9,9 @@ build:
 
 run:
   # Слушаем 3000 — тот же порт, что containerPort. База пишется в постоянный том /data.
+  # Прямые запросы к ЕИС доверяют сертификату Минцифры в коде
+  # (tender-spy/src/eis-tls.js). NODE_EXTRA_CA_CERTS задаётся в Dockerfile
+  # для сборок через Docker; на Amvera тот же набор CA подключается агентом.
   command: node tender-spy/server.js
   persistenceMount: /data
   containerPort: 3000

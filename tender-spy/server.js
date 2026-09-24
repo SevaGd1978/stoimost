@@ -8,6 +8,7 @@ import { DemoSource } from './src/sources/demo.js';
 import { TelegramNotifier } from './src/notify.js';
 import { Scheduler } from './src/scheduler.js';
 import { keywordMatches } from './src/tenders.js';
+import { extraCaLabels } from './src/eis-tls.js';
 
 let proxyDispatcher = undefined;
 if (config.proxy && typeof fetch === 'function') {
@@ -389,7 +390,11 @@ app.use((err, _req, res, _next) => {
 });
 
 const server = app.listen(config.port, '0.0.0.0', () => {
-  log.info(`Tender Spy → http://localhost:${config.port}  (режим: ${config.mode}, источник: ${scheduler.status.source}, интервал: ${store.settings.pollIntervalMin} мин)`);
+  const cas = extraCaLabels();
+  log.info(
+    `Tender Spy → http://localhost:${config.port}  (режим: ${config.mode}, источник: ${scheduler.status.source}, интервал: ${store.settings.pollIntervalMin} мин)`,
+  );
+  log.info(cas.length ? `[tls] дополнительные CA: ${cas.join(', ')}` : '[tls] сертификаты Минцифры не найдены');
   scheduler.start();
 });
 

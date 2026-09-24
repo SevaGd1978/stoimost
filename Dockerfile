@@ -19,6 +19,7 @@ RUN mkdir -p /data
 ENV PORT=3000
 ENV NODE_ENV=production
 ENV TENDER_SPY_DATA=/data/db.json
+ENV NODE_EXTRA_CA_CERTS=/app/tender-spy/certs/russian-trusted-ca-bundle.pem
 
 EXPOSE 3000
 

@@ -11,6 +11,7 @@
  * переименует поля, править нужно только QUERY_TEMPLATES ниже.
  */
 import { setTimeout as sleep } from 'node:timers/promises';
+import { createEisFetch, describeFetchError } from '../eis-tls.js';
 import { parseRss, parseDescriptionFields, pickField, stripHtml } from '../rss.js';
 import {
   parseRuNumber,
@@ -190,12 +191,14 @@ export function mapContractItem(item, query) {
 }
 
 export class ZakupkiSource {
-  constructor({ base, userAgent, timeoutMs = 25000, delayMs = 1500, fetchImpl = fetch, dispatcher, log = console }) {
+  constructor({ base, userAgent, timeoutMs = 25000, delayMs = 1500, fetchImpl, dispatcher, log = console }) {
     this.base = base;
     this.userAgent = userAgent;
     this.timeoutMs = timeoutMs;
     this.delayMs = delayMs;
-    this.fetchImpl = fetchImpl;
+    // Прокси-диспетчер умеет только глобальный fetch. Без прокси ходим своим
+    // клиентом: он доверяет сертификату Минцифры и не маскирует причину сбоя.
+    this.fetchImpl = fetchImpl ?? (dispatcher ? fetch : createEisFetch({ timeoutMs }));
     this.dispatcher = dispatcher;
     this.log = log;
   }
@@ -245,8 +248,9 @@ export class ZakupkiSource {
         this.log.info?.(`[zakupki] ${q.label}: ${found.length}`);
         tenders.push(...found);
       } catch (err) {
-        errors.push({ query: q.label, message: err.name === 'AbortError' ? 'таймаут' : err.message });
-        this.log.warn?.(`[zakupki] ${q.label}: ошибка — ${err.message}`);
+        const message = describeFetchError(err);
+        errors.push({ query: q.label, message });
+        this.log.warn?.(`[zakupki] ${q.label}: ошибка — ${message}`);
       }
       if (i < queries.length - 1) await sleep(this.delayMs);
     }
