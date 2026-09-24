@@ -31,7 +31,7 @@ npm run demo         # демо-режим: карточки генерирую�
 - Для развертывания:
   1. Создайте приложение в Amvera.
   2. Добавьте remote: `git remote add amvera https://git.amvera.ru/<username>/<app-name>`.
-  3. Отправьте ветку: `git push amvera <ваша-ветка>:master`.
+  3. Отправьте ветку: `git push amvera HEAD:master`.
   4. В панели Amvera задайте необходимые переменные (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TENDER_SPY_POLL_MIN`).
 
 ## Как пользоваться

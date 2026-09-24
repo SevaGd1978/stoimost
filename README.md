@@ -23,7 +23,7 @@
 2. Если используется Git Amvera, привяжите remote и отправьте код:
    ```bash
    git remote add amvera https://git.amvera.ru/<ваш-логин>/<имя-проекта>
-   git push amvera main:master
+   git push amvera HEAD:master
    ```
 3. Во вкладке **«Переменные»** проекта в Amvera можно настроить:
    - `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` — для мгновенных уведомлений о закупках;
