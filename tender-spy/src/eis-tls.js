@@ -75,8 +75,25 @@ export function trustedCas() {
   return [...tls.rootCertificates, ...loadExtraCas()];
 }
 
+/**
+ * Резолв только в IPv4. У части площадок объявлен IPv6, с которого облако
+ * не соединяется, и запрос зависает. Сигнатуру callback оставляем как у
+ * dns.lookup: при options.all === true вторым аргументом приходит массив.
+ */
 function lookupIpv4(hostname, options, callback) {
-  dns.lookup(hostname, { ...options, family: 4, all: false }, callback);
+  if (typeof options === 'function') {
+    callback = options;
+    options = {};
+  }
+  const wantAll = Boolean(options.all);
+  dns.lookup(hostname, { ...options, family: 4, all: wantAll }, (err, address, family) => {
+    if (err) {
+      callback(err);
+      return;
+    }
+    if (wantAll) callback(null, address);
+    else callback(null, address, family);
+  });
 }
 
 function decodeBody(headers, buf) {
