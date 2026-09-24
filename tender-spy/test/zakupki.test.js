@@ -10,6 +10,31 @@ import { keywordMatches, parseRuNumber, parseRuDate, detectLaw } from '../src/te
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => fs.readFileSync(path.join(here, 'fixtures', name), 'utf8');
 
+test('parseRss достаёт item, если XML-парсер теряет записи', () => {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0"><channel>
+<description>поиск <незакрытый фрагмент</description>
+<title>Результаты поиска</title>
+<item>
+  <title>Иной способ №32616404057</title>
+  <link>https://zakupki.gov.ru/223/purchase/public/purchase/info/common-info.html?regNumber=32616404057</link>
+  <description>&lt;strong&gt;Наименование объекта закупки: &lt;/strong&gt;Труба стальная</description>
+</item>
+<item>
+  <title>Служебный &lt;fragment</title>
+  <link>https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber=0172200002526000123</link>
+  <description>нет номера в тексте, номер в ссылке</description>
+</item>
+</channel></rss>`;
+  const items = parseRss(xml);
+  assert.equal(items.length, 2);
+  assert.match(items[0].link, /32616404057/);
+  assert.match(items[0].description, /Труба стальная/);
+  const card = mapNoticeItem(items[0], { kind: 'notices', match: { type: 'keyword', ref: 'труба', label: 'труба' } });
+  assert.equal(card.number, '32616404057');
+  assert.equal(card.law, '223');
+});
+
 test('parseRss читает RSS ЕИС с CDATA', () => {
   const items = parseRss(fixture('notices.rss.xml'));
   assert.equal(items.length, 2);

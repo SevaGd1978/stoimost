@@ -234,14 +234,6 @@ export class ZakupkiSource {
       throw new Error(`ЕИС вернул не RSS (${String(xml).length} байт): ${head.slice(0, 180) || 'пустой ответ'}`);
     }
     const items = parseRss(xml);
-    if (!items.length) {
-      const raw = String(xml);
-      const itemTags = (raw.match(/<item\b/gi) || []).length;
-      const at = raw.slice(500, 900).replace(/\s+/g, ' ');
-      this.log.info?.(
-        `[zakupki] ${query.label}: пусто, байт=${raw.length}, item=${itemTags}, срез=${at.slice(0, 280) || 'пусто'}`,
-      );
-    }
     const mapper = query.kind === 'contracts' ? mapContractItem : mapNoticeItem;
     return items.map((it) => mapper(it, query)).filter(Boolean);
   }
