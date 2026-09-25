@@ -13,6 +13,7 @@ import { Scheduler } from './src/scheduler.js';
 import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js';
 import { extraCaLabels } from './src/eis-tls.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
+import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 
 let proxyDispatcher = undefined;
 if (config.proxy && typeof fetch === 'function') {
@@ -418,6 +419,31 @@ app.post('/api/scan', async (_req, res) => {
 });
 
 app.get('/api/runs', (_req, res) => res.json(store.runs));
+
+const searchCache = new Map();
+let searchRunning = false;
+app.get('/api/search', async (req, res) => {
+  const keywords = parseSearchKeywords(req.query.q);
+  if (!keywords.length) return res.status(400).json({ error: 'Передайте фразы: ?q=труба ППУ&q=скорлупа ППУ' });
+  if (keywords.length > SEARCH_LIMITS.keywords || keywords.some((k) => k.length > SEARCH_LIMITS.keywordLength)) {
+    return res.status(400).json({ error: `Не больше ${SEARCH_LIMITS.keywords} фраз по ${SEARCH_LIMITS.keywordLength} символов` });
+  }
+  const key = keywords.map((k) => k.toLowerCase()).sort().join('|');
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.at < SEARCH_LIMITS.cacheMs) return res.json(cached.body);
+  if (searchRunning || scheduler.running) return res.status(409).json({ error: 'Идёт другой поиск или опрос, повторите через минуту' });
+  searchRunning = true;
+  try {
+    const startedAt = new Date().toISOString();
+    const result = await source.collect({ nomenclature: keywords.map((keyword) => ({ keyword, okpd2: '' })), settings: searchSettings() });
+    const items = mergeFound(result.tenders);
+    const body = { startedAt, finishedAt: new Date().toISOString(), keywords, queriesRun: result.queriesRun, total: items.length, items, errors: result.errors };
+    searchCache.set(key, { at: Date.now(), body });
+    res.json(body);
+  } finally {
+    searchRunning = false;
+  }
+});
 
 app.get('/api/queries', (_req, res) => {
   const eis = buildQueries({
