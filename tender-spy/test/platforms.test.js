@@ -258,3 +258,11 @@ test('Store при загрузке убирает сохранённые про
   assert.ok(!('torgi' in store.settings.platforms) && !('rad' in store.settings.platforms));
   assert.equal(store.settings.platforms.tektorg, false);
 });
+
+test('toTender: номер ЕИС в поле номера площадки — тот же id, что у карточки ЕИС', async () => {
+  const { toTender } = await import('../src/sources/platforms/source.js');
+  const t = toTender({ id: 'tektorg', category: 'purchase' }, { number: '0303100001626000070', title: 'Скорлупа ППУ', url: 'https://t/1' }, 'ППУ');
+  assert.equal(t.id, 'notice:0303100001626000070');
+  const own = toTender({ id: 'tektorg', category: 'purchase' }, { number: '19848909', title: 'Скорлупа ППУ', url: 'https://t/2' }, 'ППУ');
+  assert.equal(own.id, 'tektorg:19848909');
+});

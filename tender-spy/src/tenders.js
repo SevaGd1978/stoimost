@@ -68,6 +68,18 @@ export function isOpenStage(stage) {
   return OPEN_STAGES.some((k) => s.includes(k));
 }
 
+export const STALE_NOTICE_DAYS = 90;
+
+/**
+ * ЕИС годами держит брошенные извещения на этапе «Подача заявок».
+ * Без срока подачи верим этапу только для свежих публикаций.
+ */
+export function staleNotice({ publishedAt, deadlineAt }, now = Date.now()) {
+  if (deadlineAt) return Date.parse(deadlineAt) < now;
+  const published = Date.parse(publishedAt ?? '');
+  return Number.isFinite(published) && now - published > STALE_NOTICE_DAYS * 86_400_000;
+}
+
 export function normalizeKeyword(s) {
   return String(s ?? '')
     .toLowerCase()

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { parsePriceBound } from './tenders.js';
+import { parsePriceBound, staleNotice } from './tenders.js';
 import { PLATFORM_IDS } from './sources/platforms/index.js';
 
 const DB_VERSION = 1;
@@ -61,6 +61,7 @@ export class Store {
       const saved = parsed.settings?.platforms || {};
       this.db.settings.platforms = Object.fromEntries(PLATFORM_IDS.map((id) => [id, saved[id] !== false]));
       this.dropPropertySales();
+      this.closeStaleNotices();
       this.db.watchlist = {
         companies: parsed.watchlist?.companies ?? [],
         nomenclature: parsed.watchlist?.nomenclature ?? [],
@@ -357,6 +358,18 @@ export class Store {
       }
     }
     return removed;
+  }
+
+  closeStaleNotices(now = Date.now()) {
+    let closed = 0;
+    for (const t of Object.values(this.tenders)) {
+      if (t.kind === 'notice' && t.isOpen && staleNotice(t, now)) {
+        t.isOpen = false;
+        t.stage = `${t.stage || 'Подача заявок'} (запись устарела)`;
+        closed++;
+      }
+    }
+    return closed;
   }
 
   /** Удаляет тендеры, которые давно не встречались в выборках и не отмечены избранными. */

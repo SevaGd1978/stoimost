@@ -101,6 +101,7 @@ export class Scheduler extends EventEmitter {
       if (!priceAllowed(t.price, settings)) continue;
       if (this.store.upsertTender(t)) added.push(this.store.tenders[t.id]);
     }
+    this.store.closeStaleNotices();
     const pruned = this.store.prune(this.retentionDays);
     this.store.scheduleSave();
 

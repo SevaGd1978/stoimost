@@ -62,7 +62,12 @@ export function enabledPlatforms(settings = {}, platforms = PLATFORMS) {
 
 /** Строка выдачи площадки → карточка тендера в формате ленты. */
 export function toTender(platform, item, keyword) {
-  const eisNumber = item.eisNumber && isEisNumber(item.eisNumber) ? item.eisNumber : null;
+  const eisNumber =
+    item.eisNumber && isEisNumber(item.eisNumber)
+      ? item.eisNumber
+      : /^0\d{18}$|^3\d{10}$/.test(String(item.number ?? ''))
+        ? String(item.number)
+        : null;
   const number = eisNumber || String(item.number);
   const title = item.title || `Процедура № ${number}`;
   // Площадки не всегда вовремя меняют статус: срок подачи прошёл — приём закрыт.

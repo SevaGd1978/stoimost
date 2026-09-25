@@ -19,6 +19,7 @@ import {
   extractRegNumber,
   detectLaw,
   isOpenStage,
+  staleNotice,
   keywordMatches,
   innMentioned,
 } from '../tenders.js';
@@ -133,6 +134,9 @@ export function mapNoticeItem(item, query) {
       : match.type === 'keyword'
         ? keywordMatches(match.ref, `${title} ${plain}`)
         : true;
+  const publishedAt = parseRuDate(pickField(fields, 'размещено', 'дата размещения')) || parseRuDate(item.pubDate);
+  const deadlineAt = parseRuDate(pickField(fields, 'окончание подачи', 'дата окончания'));
+  const stale = (!stage || isOpenStage(stage)) && staleNotice({ publishedAt, deadlineAt });
   return {
     id: `notice:${number}`,
     source: 'zakupki',
@@ -147,11 +151,11 @@ export function mapNoticeItem(item, query) {
     supplierInn: null,
     price: parseRuNumber(pickField(fields, 'начальная', 'цена')),
     currency: pickField(fields, 'валюта') || 'RUB',
-    publishedAt: parseRuDate(pickField(fields, 'размещено', 'дата размещения')) || parseRuDate(item.pubDate),
+    publishedAt,
     updatedAt: parseRuDate(pickField(fields, 'обновлено')) || parseRuDate(item.pubDate),
-    deadlineAt: parseRuDate(pickField(fields, 'окончание подачи', 'дата окончания')),
-    stage: stage || 'Подача заявок',
-    isOpen: stage ? isOpenStage(stage) : true,
+    deadlineAt,
+    stage: stale ? `${stage || 'Подача заявок'} (запись устарела)` : stage || 'Подача заявок',
+    isOpen: stale ? false : stage ? isOpenStage(stage) : true,
     region: pickField(fields, 'регион', 'место поставки') || null,
     url: item.link,
     matches: [match],
