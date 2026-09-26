@@ -185,3 +185,18 @@ test('Scheduler.runOnce с пустым watchlist возвращает подс�
   scheduler.stop();
   assert.match(run.errors[0].message, /номенклатур/);
 });
+
+test('Store: очистка ленты — просмотренные и закрытые в архив, избранные и новые открытые остаются', () => {
+  const store = new Store(tmpFile());
+  for (const id of ['notice:1', 'notice:2', 'notice:3', 'notice:4']) store.upsertTender(sample(id));
+  store.upsertTender(sample('notice:5', { isOpen: false, stage: 'Работа комиссии' }));
+  store.patchTender('notice:1', { seen: true });
+  store.patchTender('notice:2', { seen: true, favorite: true });
+  store.patchTender('notice:4', { archived: true });
+  assert.equal(store.archiveSeenAndClosed(), 2);
+  const archived = (id) => store.tenders[id].archived;
+  assert.deepEqual(['notice:1', 'notice:2', 'notice:3', 'notice:4', 'notice:5'].map(archived), [true, false, false, true, true]);
+  store.upsertTender(sample('notice:1'));
+  assert.equal(archived('notice:1'), true);
+  assert.equal(store.archiveSeenAndClosed(), 0);
+});

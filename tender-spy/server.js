@@ -275,6 +275,10 @@ app.post('/api/tenders/mark-all-seen', (_req, res) => {
   res.json({ marked: store.markAllSeen(), stats: stats() });
 });
 
+app.post('/api/tenders/archive-old', (_req, res) => {
+  res.json({ archived: store.archiveSeenAndClosed(), stats: stats() });
+});
+
 // ---- watchlist: предприятия -------------------------------------------------
 app.post('/api/companies', (req, res) => {
   const inn = normalizeInn(req.body?.inn);

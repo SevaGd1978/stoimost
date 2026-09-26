@@ -222,6 +222,13 @@
     await Promise.all([loadFeed(), loadState()]);
   });
 
+  $('#btn-archive-old').addEventListener('click', async () => {
+    if (!confirm('Убрать из ленты в архив все просмотренные и закрытые закупки?\nИзбранные и новые открытые останутся. Архив — галочка «Архив» в фильтрах.')) return;
+    const r = await api('/api/tenders/archive-old', { method: 'POST' });
+    toast(r.archived ? `Убрано в архив: ${r.archived}` : 'Нечего убирать', 'ok');
+    await Promise.all([loadFeed(), loadState()]);
+  });
+
   function fillFilterSelects() {
     const ns = $('#f-nomen');
     const curN = ns.value;

@@ -347,6 +347,24 @@ export class Store {
     return n;
   }
 
+  /**
+   * Убирает из ленты в архив просмотренные и закрытые карточки, кроме избранных.
+   * Не удаляет: удалённая карточка при следующем опросе вернулась бы как новая.
+   */
+  archiveSeenAndClosed() {
+    let n = 0;
+    for (const t of Object.values(this.tenders)) {
+      if (t.archived || t.favorite) continue;
+      if (t.seen || (t.kind === 'notice' && t.isOpen === false)) {
+        t.archived = true;
+        t.seen = true;
+        n++;
+      }
+    }
+    this.scheduleSave();
+    return n;
+  }
+
   /** Продажа имущества в мониторинг не входит: убираем такие карточки, кроме избранных. */
   dropPropertySales() {
     let removed = 0;
