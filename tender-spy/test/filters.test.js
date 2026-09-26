@@ -154,3 +154,17 @@ test('Store: уточняющие слова позиции сохраняютс
   assert.deepEqual(store.exportWatchlist().nomenclature, [{ keyword: 'Ппу', okpd2: '', context: ['труб', 'скорлуп'] }]);
   assert.deepEqual(store.settings.minusWords, DEFAULT_MINUS_WORDS);
 });
+
+test('Store.applyCard: регион из предмета закупки главнее адреса головной компании', () => {
+  const store = new Store(tmpFile());
+  store.upsertTender(notice('32616404967', 'Поставка фасонных изделий в ППУ изоляции для нужд Филиал «Владимирский» ПАО «Т Плюс»'));
+  store.upsertTender(notice('32616402520', 'Фасонные изделия в ППУ изоляции для нужд филиала «Кировский» ПАО «Т Плюс»'));
+  store.upsertTender(notice('32616406448', 'Поставка скорлупы, отводов ППУ'));
+  const card = { deadlineAt: '2099-10-05T11:00:00.000Z', region: 'Московская область' };
+  store.applyCard('notice:32616404967', card);
+  store.applyCard('notice:32616402520', card);
+  store.applyCard('notice:32616406448', { ...card, region: 'Самарская область' });
+  assert.equal(store.tenders['notice:32616404967'].region, 'Владимирская область');
+  assert.equal(store.tenders['notice:32616402520'].region, 'Кировская область');
+  assert.equal(store.tenders['notice:32616406448'].region, 'Самарская область');
+});

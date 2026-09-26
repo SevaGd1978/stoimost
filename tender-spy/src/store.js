@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { parsePriceBound, staleNotice } from './tenders.js';
 import { PLATFORM_IDS } from './sources/platforms/index.js';
 import { DEFAULT_MINUS_WORDS, parseWordList } from './filters.js';
+import { regionFromText } from './regions.js';
 
 const DB_VERSION = 1;
 const REMOVED_SALE_SOURCES = new Set(['torgi', 'rad']);
@@ -65,6 +66,10 @@ export class Store {
       this.db.settings.platforms = Object.fromEntries(PLATFORM_IDS.map((id) => [id, saved[id] !== false]));
       this.dropPropertySales();
       this.closeStaleNotices();
+      for (const t of Object.values(this.db.tenders)) {
+        const fromTitle = t.cardAt && regionFromText(t.title);
+        if (fromTitle) t.region = fromTitle;
+      }
       this.db.watchlist = {
         companies: parsed.watchlist?.companies ?? [],
         nomenclature: parsed.watchlist?.nomenclature ?? [],
@@ -409,7 +414,9 @@ export class Store {
     }
     t.cardAt = new Date().toISOString();
     if (card.deadlineAt) t.deadlineAt = card.deadlineAt;
-    if (card.region) t.region = card.region;
+    // В карточке 223-ФЗ — адрес головной компании; регион из предмета («для филиала «Владимирский»») точнее.
+    const region = regionFromText(t.title) || card.region;
+    if (region) t.region = region;
     if (card.customerInn) t.customerInn ||= card.customerInn;
     this.scheduleSave();
     return t;
