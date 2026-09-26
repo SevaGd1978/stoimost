@@ -129,6 +129,7 @@ data/db.json              — база (создаётся автоматиче�
 | GET | `/api/tenders.csv?…` | та же выборка в CSV |
 | PATCH | `/api/tenders/:id` | `{seen, favorite, archived, comment}` |
 | POST | `/api/tenders/mark-all-seen` | всё прочитано |
+| POST | `/api/tenders/archive-old` | кнопка «Очистить просмотренные и старые»: просмотренные и закрытые закупки уходят в архив (не удаляются, чтобы следующий опрос не вернул их как новые); избранные и новые открытые остаются |
 | POST / PATCH / DELETE | `/api/companies[/:id]` | предприятия `{inn, name, role, note}` |
 | POST | `/api/companies/batch` | пакетное добавление ИНН списком `items: [...]` |
 | POST / DELETE | `/api/nomenclature[/:id]` | номенклатура `{keyword, okpd2}` |
