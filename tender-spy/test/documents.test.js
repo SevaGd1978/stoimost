@@ -12,7 +12,7 @@ import {
   printFormUrl,
 } from '../src/documents/eis-documents.js';
 import { classify } from '../src/documents/convert.js';
-import { DocumentService, eisCardUrl } from '../src/documents/service.js';
+import { DocumentService, eisCardUrl, findEisTwin } from '../src/documents/service.js';
 
 const fixture = (name) => fs.readFileSync(new URL(`./fixtures/eis-documents/${name}`, import.meta.url), 'utf8');
 
@@ -201,4 +201,19 @@ test('DocumentService: «running» после перезапуска серве�
   const store = { tenders: { a: { id: 'a', documents: { state: 'running' } } }, scheduleSave() {} };
   new DocumentService({ store, fetchImpl: async () => null, dataDir: tmpDir() });
   assert.equal(store.tenders.a.documents.state, 'error');
+});
+
+test('findEisTwin: закупка B2B-Center находит копию в ЕИС по номеру в скобках', () => {
+  const b2b = { id: 'b2bcenter:4613943', source: 'b2bcenter', kind: 'notice', number: '4613943', url: 'https://www.b2b-center.ru/market/x/tender-4613943/' };
+  const eis = {
+    id: 'notice:32616404967',
+    source: 'zakupki',
+    kind: 'notice',
+    number: '32616404967',
+    title: 'Поставка фасонных изделий в ППУ изоляции для нужд филиала «Владимирский» ПАО «Т Плюс» (4613943)',
+    url: 'https://zakupki.gov.ru/223/purchase/public/purchase/info/common-info.html?regNumber=32616404967',
+  };
+  const other = { ...eis, id: 'notice:1', number: '1', title: 'Поставка труб (46139430)' };
+  assert.equal(findEisTwin(b2b, { [b2b.id]: b2b, [other.id]: other, [eis.id]: eis }), eis);
+  assert.equal(findEisTwin(b2b, { [b2b.id]: b2b, [other.id]: other }), null);
 });

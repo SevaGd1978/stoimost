@@ -43,6 +43,17 @@ export function eisCardUrl(tender) {
   return null;
 }
 
+/** Закупка площадки, опубликованная и в ЕИС: заказчики (например, «Т Плюс») пишут номер площадки в скобках в названии. */
+export function findEisTwin(tender, tenders) {
+  const numbers = [tender.platformNumber, tender.number].filter((n) => n && /^\d{5,}$/.test(n));
+  if (!numbers.length) return null;
+  for (const t of Object.values(tenders)) {
+    if (t === tender || !eisCardUrl(t) || t.kind === 'contract') continue;
+    if (numbers.some((n) => String(t.title || '').includes(`(${n})`))) return t;
+  }
+  return null;
+}
+
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' }) : '');
 const fmtPrice = (n) => (n == null ? '—' : `${Math.round(n).toLocaleString('ru-RU')} ₽`);
@@ -264,7 +275,9 @@ export class DocumentService {
     fs.mkdirSync(originalsDir, { recursive: true });
     fs.mkdirSync(pdfDir, { recursive: true });
 
-    const cardUrl = eisCardUrl(tender);
+    const twin = eisCardUrl(tender) ? null : findEisTwin(tender, this.store.tenders);
+    if (twin) job.notes.push(`Документы взяты из ЕИС: та же закупка опубликована под № ${twin.number}.`);
+    const cardUrl = eisCardUrl(tender) || (twin && eisCardUrl(twin));
     if (!cardUrl) {
       const name = this.platformName(tender.source);
       throw new UserError(
