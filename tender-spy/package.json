@@ -1,0 +1,30 @@
+{
+  "name": "tender-spy",
+  "version": "1.0.0",
+  "description": "Мониторинг открытых тендеров в России (ЕИС zakupki.gov.ru) по ИНН предприятий и номенклатуре",
+  "private": true,
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "start:env": "node --env-file=.env server.js",
+    "dev": "node --watch server.js",
+    "demo": "node server.js --demo",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "fast-xml-parser": "^4.4.1"
+  },
+  "keywords": [
+    "tenders",
+    "zakupki",
+    "44-фз",
+    "223-фз",
+    "monitoring"
+  ],
+  "license": "MIT"
+}

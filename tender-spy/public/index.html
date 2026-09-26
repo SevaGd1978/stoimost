@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tender Spy — мониторинг тендеров по номенклатуре</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🕵️%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="toast-stack" id="toasts"></div>
+
+  <!-- Модальное окно импорта Watchlist -->
+  <div class="modal-backdrop" id="modal-import" hidden>
+    <div class="modal-box">
+      <div class="card-title">Импорт номенклатуры</div>
+      <p class="muted small">Файл CSV, TXT, JSON или Excel (.xlsx). В таблице — колонки «Ключевые слова» и «ОКПД2». Без заголовка каждая строка считается отдельной позицией. Подойдёт UTF-8 и Windows-1251.</p>
+      <div class="file-row mt-sm">
+        <label class="btn btn-ghost">Выбрать файл
+          <input type="file" id="import-file" accept=".csv,.txt,.tsv,.json,.xlsx,text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        </label>
+        <span class="muted small" id="import-file-name">Файл не выбран</span>
+      </div>
+      <p class="muted small mt-sm">Или вставьте JSON:</p>
+      <textarea class="input" id="import-json-input" rows="6" placeholder='[{"keyword":"труба","okpd2":"24.20.13"}]'></textarea>
+      <label class="switch mt-sm"><input type="checkbox" id="import-replace" /> Заменить текущую номенклатуру</label>
+      <div class="form-row mt">
+        <button class="btn btn-primary" id="btn-import-confirm">Применить импорт</button>
+        <button class="btn btn-ghost" id="btn-import-close">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">🕵️</div>
+        <div>
+          <div class="brand-title">Tender <span>Spy</span></div>
+          <div class="brand-sub">ЕИС · 44-ФЗ · 223-ФЗ</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-view="feed">📡 Лента <span class="nav-badge" id="badge-unseen" hidden>0</span></button>
+        <button class="nav-item" data-view="favorites">⭐ Избранное <span class="nav-badge fav-badge" id="badge-fav" hidden>0</span></button>
+        <button class="nav-item" data-view="watchlist">🎯 Наблюдение</button>
+        <button class="nav-item" data-view="analytics">📊 Аналитика</button>
+        <button class="nav-item" data-view="settings">⚙️ Настройки</button>
+        <button class="nav-item" data-view="log">📜 Журнал опросов</button>
+      </nav>
+
+      <div class="side-card">
+        <div class="side-card-title">Статус</div>
+        <div class="status-row"><span>Режим</span><b id="st-mode">—</b></div>
+        <div class="status-row"><span>Последний опрос</span><b id="st-last">—</b></div>
+        <div class="status-row"><span>Следующий</span><b id="st-next">—</b></div>
+        <div class="status-row"><span>Telegram</span><b id="st-tg">—</b></div>
+        <button class="btn btn-primary btn-block" id="btn-scan">🔄 Опросить сейчас</button>
+        <div class="scan-progress" id="scan-progress" hidden><span class="spinner"></span> Запросы к ЕИС…</div>
+      </div>
+
+      <div class="side-card stats">
+        <div class="stat"><b id="s-open">0</b><span>открытых</span></div>
+        <div class="stat"><b id="s-unseen">0</b><span>новых</span></div>
+        <div class="stat"><b id="s-contracts">0</b><span>контрактов</span></div>
+        <div class="stat"><b id="s-fav">0</b><span>избранных</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- ЛЕНТА -->
+      <section class="view" id="view-feed">
+        <header class="view-head">
+          <div>
+            <h1>Лента закупок</h1>
+            <p class="muted" id="feed-summary">Закупки, попавшие под вашу номенклатуру</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-mark-seen">✓ Всё прочитано</button>
+            <button class="btn btn-ghost" id="btn-archive-old" title="Просмотренные и закрытые закупки уйдут в архив. Избранные и новые открытые останутся">🧹 Очистить просмотренные и старые</button>
+            <a class="btn btn-ghost" id="btn-csv" href="/api/tenders.csv" download>📤 CSV</a>
+          </div>
+        </header>
+
+        <div class="filters">
+          <input class="input" id="f-q" type="search" placeholder="Поиск: слово, номер, заказчик…" />
+          <select class="input" id="f-nomen"><option value="">Вся номенклатура</option></select>
+          <select class="input" id="f-kind">
+            <option value="all">Извещения и контракты</option>
+            <option value="notice">Только извещения</option>
+            <option value="contract">Только контракты</option>
+          </select>
+          <select class="input" id="f-law">
+            <option value="all">44-ФЗ + 223-ФЗ</option>
+            <option value="44">44-ФЗ</option>
+            <option value="223">223-ФЗ</option>
+            <option value="615">615-ПП</option>
+          </select>
+          <select class="input" id="f-source"><option value="all">Все площадки</option></select>
+          <input class="input price-input" id="f-min" inputmode="decimal" placeholder="Цена от, ₽" autocomplete="off" />
+          <input class="input price-input" id="f-max" inputmode="decimal" placeholder="Цена до, ₽" autocomplete="off" />
+          <select class="input" id="f-sort">
+            <option value="fresh">Сначала новые в ленте</option>
+            <option value="published">По дате размещения</option>
+            <option value="deadline">По сроку подачи</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="price_asc">Цена ↑</option>
+          </select>
+          <label class="chip"><input type="checkbox" id="f-new" /> только новые</label>
+          <label class="chip"><input type="checkbox" id="f-open" checked /> только открытые</label>
+          <label class="chip"><input type="checkbox" id="f-fav" /> ★ избранные</label>
+          <label class="chip"><input type="checkbox" id="f-arch" /> архив</label>
+        </div>
+        <div class="filters">
+          <select class="input" id="f-region"><option value="">Все регионы</option></select>
+          <select class="input" id="f-subject">
+            <option value="">Поставка и работы</option>
+            <option value="supply">Только поставка</option>
+            <option value="works">Только работы и услуги</option>
+          </select>
+          <select class="input" id="f-ctype"><option value="">Любой заказчик</option></select>
+          <select class="input" id="f-method"><option value="">Любой способ</option></select>
+          <select class="input" id="f-smp">
+            <option value="">СМП: все</option>
+            <option value="exclude">Без ограничения «только СМП»</option>
+            <option value="only">Только для СМП</option>
+          </select>
+          <select class="input" id="f-published">
+            <option value="">Размещено: когда угодно</option>
+            <option value="1">за сутки</option>
+            <option value="3">за 3 дня</option>
+            <option value="7">за неделю</option>
+            <option value="30">за месяц</option>
+          </select>
+          <input class="input days-input" id="f-mindays" type="number" min="0" max="90" placeholder="Осталось дней, от" title="Срок подачи не раньше чем через N дней. Закупки, у которых срок ещё не известен, показываются" />
+          <label class="chip" title="Скрыть закупки по удалённым позициям номенклатуры, по выключенным законам, с ценой вне диапазона, с минус-словами и без уточняющих слов"><input type="checkbox" id="f-actual" checked /> по текущим настройкам</label>
+        </div>
+
+        <div class="list" id="feed-list"></div>
+        <div class="empty" id="feed-empty" hidden>
+          <div class="empty-icon">🔍</div>
+          <h3>Пока пусто</h3>
+          <p>Добавьте номенклатуру в разделе «Наблюдение», затем нажмите «Опросить сейчас».</p>
+        </div>
+      </section>
+
+      <!-- ИЗБРАННОЕ -->
+      <section class="view" id="view-favorites" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Избранное</h1>
+            <p class="muted" id="fav-summary">Закупки, отобранные для дальнейшего рассмотрения</p>
+          </div>
+          <div class="head-actions">
+            <a class="btn btn-ghost" id="btn-fav-csv" href="/api/tenders.csv?favorite=1&amp;archived=any&amp;sort=favorited" download>📤 CSV</a>
+          </div>
+        </header>
+
+        <div class="filters">
+          <input class="input" id="fv-q" type="search" placeholder="Поиск по избранному и заметкам…" />
+          <select class="input" id="fv-sort">
+            <option value="favorited">Сначала добавленные недавно</option>
+            <option value="deadline">По сроку подачи</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="price_asc">Цена ↑</option>
+          </select>
+          <label class="chip"><input type="checkbox" id="fv-open" /> только открытые</label>
+        </div>
+
+        <div class="list" id="fav-list"></div>
+        <div class="empty" id="fav-empty" hidden>
+          <div class="empty-icon">⭐</div>
+          <h3>В избранном пока пусто</h3>
+          <p>В ленте нажмите «☆ В избранное» на карточке закупки — она появится здесь вместе с полем для заметок.</p>
+        </div>
+      </section>
+
+      <!-- НАБЛЮДЕНИЕ -->
+      <section class="view" id="view-watchlist" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Список наблюдения</h1>
+            <p class="muted">Что искать в ЕИС и на площадках: ключевые слова и коды ОКПД2</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-export-wl">📤 Экспорт JSON</button>
+            <button class="btn btn-ghost" id="btn-import-wl">📥 Импорт файла</button>
+          </div>
+        </header>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">📦 Номенклатура</div>
+            <form class="form" id="form-nomen">
+              <div class="form-row">
+                <div class="field grow-2">
+                  <label>Ключевые слова <span class="hint">как в поиске ЕИС</span></label>
+                  <input class="input" name="keyword" placeholder="труба предизолированная" />
+                </div>
+                <div class="field grow">
+                  <label>ОКПД2 <span class="hint">необязательно</span></label>
+                  <input class="input" name="okpd2" placeholder="24.20.13" />
+                </div>
+              </div>
+              <div class="field">
+                <label>Уточняющие слова <span class="hint">необязательно; в названии закупки должно быть хотя бы одно, через запятую</span></label>
+                <input class="input" name="context" placeholder="труб, изоляц, скорлуп, отвод, фасон" />
+              </div>
+              <button class="btn btn-primary" type="submit">＋ Добавить позицию</button>
+            </form>
+            <div class="items" id="nomen-list"></div>
+            <details class="details">
+              <summary>Какие запросы уйдут в ЕИС и на площадки</summary>
+              <div id="queries-preview" class="queries"></div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- АНАЛИТИКА -->
+      <section class="view" id="view-analytics" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Аналитика выборки</h1>
+            <p class="muted">Суммы НМЦК, распределение по законам, этапам и топ контрагентов</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-refresh-analytics">🔄 Обновить</button>
+          </div>
+        </header>
+
+        <div class="grid-4 mb">
+          <div class="stat-card">
+            <div class="stat-title">Общая сумма НМЦК / контрактов</div>
+            <div class="stat-big" id="an-total-price">0 ₽</div>
+            <div class="stat-sub" id="an-count">0 активных позиций</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Средний чек закупки</div>
+            <div class="stat-big" id="an-avg-price">0 ₽</div>
+            <div class="stat-sub">по закупкам с указанной ценой</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Максимальная закупка</div>
+            <div class="stat-big" id="an-max-price">0 ₽</div>
+            <div class="stat-sub">самый крупный лот</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Доля 44-ФЗ / 223-ФЗ</div>
+            <div class="stat-big" id="an-laws-ratio">—</div>
+            <div class="stat-sub" id="an-laws-sub">распределение бюджета</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">📜 Распределение по законам и типам</div>
+            <table class="table" id="an-laws-table">
+              <thead><tr><th>Категория</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+
+            <div class="card-title mt">📍 Распределение по этапам</div>
+            <table class="table" id="an-stages-table">
+              <thead><tr><th>Этап</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <div class="card-title">🏢 Топ-10 заказчиков (по объёму НМЦК)</div>
+            <table class="table" id="an-customers-table">
+              <thead><tr><th>Заказчик</th><th>Лотов</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+
+            <div class="card-title mt">🏆 Топ-10 поставщиков (по выигранным контрактам)</div>
+            <table class="table" id="an-suppliers-table">
+              <thead><tr><th>Поставщик</th><th>Контрактов</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- НАСТРОЙКИ -->
+      <section class="view" id="view-settings" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Настройки</h1>
+            <p class="muted">Периодичность опроса, законы, уведомления</p>
+          </div>
+        </header>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">⏱ Опрос</div>
+            <div class="field">
+              <label>Интервал автоопроса, минут</label>
+              <input class="input" id="set-interval" type="number" min="1" max="1440" />
+            </div>
+            <label class="switch"><input type="checkbox" id="set-onlyopen" /> Только закупки на этапе подачи заявок</label>
+            <div class="card-title mt">💰 Цена закупки (НМЦК)</div>
+            <p class="muted small">Уходит в запрос к ЕИС и к площадкам, где есть такой фильтр; у остальных лишнее отсекается по цене карточки. Закупки без указанной цены не отбрасываются. Пусто — без ограничения.</p>
+            <div class="form-row">
+              <div class="field grow">
+                <label>от, ₽</label>
+                <input class="input" id="set-price-min" inputmode="decimal" placeholder="100 000" autocomplete="off" />
+              </div>
+              <div class="field grow">
+                <label>до, ₽</label>
+                <input class="input" id="set-price-max" inputmode="decimal" placeholder="5 000 000" autocomplete="off" />
+              </div>
+            </div>
+            <div class="card-title mt">🚫 Минус-слова</div>
+            <p class="muted small">Закупки, в названии которых есть такое слово, не попадают в ленту. Фраза отсекает, только если в названии есть все её слова. Через запятую или с новой строки.</p>
+            <textarea class="input" id="set-minus" rows="4" placeholder="запасные части, лекарственный препарат"></textarea>
+            <div class="card-title mt">📜 Законы</div>
+            <label class="switch"><input type="checkbox" id="set-fz44" /> 44-ФЗ (госзакупки)</label>
+            <label class="switch"><input type="checkbox" id="set-fz223" /> 223-ФЗ (госкомпании, естественные монополии)</label>
+            <label class="switch"><input type="checkbox" id="set-fz615" /> 615-ПП (капремонт МКД)</label>
+            <div class="card-title mt">🏛 Площадки</div>
+            <p class="muted small">ЕИС опрашивается всегда. Здесь — дополнительные открытые площадки, поиск по ключевым словам номенклатуры (позиции только с ОКПД2 на площадки не уходят).</p>
+            <div id="set-platforms"></div>
+            <button class="btn btn-primary mt" id="btn-save-settings">💾 Сохранить</button>
+          </div>
+          <div class="card">
+            <div class="card-title">🔔 Уведомления</div>
+            <label class="switch"><input type="checkbox" id="set-browser" /> Уведомления браузера о новых закупках</label>
+            <label class="switch"><input type="checkbox" id="set-telegram" /> Отправлять в Telegram <span class="hint" id="tg-hint"></span></label>
+            <div class="form-row mt-sm" id="tg-test-row">
+              <button class="btn btn-ghost btn-sm" id="btn-test-tg">Тест Telegram</button>
+            </div>
+            <p class="muted small">Для Telegram задайте переменные окружения <code>TELEGRAM_BOT_TOKEN</code> и <code>TELEGRAM_CHAT_ID</code> при запуске сервера.</p>
+            <div class="card-title mt">ℹ️ Источник данных и прокси</div>
+            <p class="muted small" id="source-note"></p>
+            <p class="muted small">Поддержка исходящего прокси (HTTP/HTTPS/SOCKS5): задайте <code>HTTPS_PROXY=http://user:pass@host:port</code> при запуске.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ЖУРНАЛ -->
+      <section class="view" id="view-log" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Журнал опросов</h1>
+            <p class="muted">Что и когда запрашивалось, сколько найдено, ошибки</p>
+          </div>
+        </header>
+        <div class="card">
+          <table class="table" id="runs-table">
+            <thead><tr><th>Начало</th><th>Триггер</th><th>Запросов</th><th>Найдено</th><th>Новых</th><th>Ошибки</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
