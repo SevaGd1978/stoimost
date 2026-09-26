@@ -11,7 +11,9 @@ import { PLATFORMS, platformInfo } from './src/sources/platforms/index.js';
 import { TelegramNotifier } from './src/notify.js';
 import { Scheduler } from './src/scheduler.js';
 import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js';
-import { extraCaLabels } from './src/eis-tls.js';
+import { createEisFetch, extraCaLabels } from './src/eis-tls.js';
+import { DocumentService, DocumentsError } from './src/documents/service.js';
+import { tools as documentTools } from './src/documents/convert.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 import {
@@ -64,6 +66,14 @@ const source =
 
 const notifier = new TelegramNotifier({ token: config.telegram.token, chatId: config.telegram.chatId, log });
 const scheduler = new Scheduler({ store, source, notifier, retentionDays: config.retentionDays, log });
+const documents = new DocumentService({
+  store,
+  fetchImpl: createEisFetch({ timeoutMs: 180_000 }),
+  dataDir: path.dirname(config.dataFile),
+  userAgent: config.userAgent,
+  platformName: (id) => PLATFORMS.find((p) => p.id === id)?.name || id,
+  log,
+});
 
 const app = express();
 app.use(express.json({ limit: '3mb' }));
@@ -82,6 +92,7 @@ function broadcast(event, data) {
 scheduler.on('run:start', (d) => broadcast('run:start', d));
 scheduler.on('run:done', ({ run, added }) => broadcast('run:done', { run, added: added.map(brief) }));
 scheduler.on('cards:done', (d) => broadcast('cards:done', d));
+documents.onUpdate((job) => broadcast('documents', { tenderId: job.tenderId, state: job.state, step: job.step, pages: job.pages, error: job.error }));
 
 function brief(t) {
   return { id: t.id, title: t.title, customer: t.customer, price: t.price, url: t.url, law: t.law, matches: t.matches };
@@ -190,6 +201,7 @@ app.get('/api/state', (_req, res) => {
     analytics: analytics(),
     lastRun: store.runs[0] ?? null,
     facets: facets(),
+    documentTools: documentTools(),
   });
 });
 
@@ -323,6 +335,36 @@ app.patch('/api/tenders/:id', (req, res) => {
   const t = store.patchTender(req.params.id, req.body ?? {});
   if (!t) return res.status(404).json({ error: 'Тендер не найден' });
   res.json(t);
+});
+
+// ---- документация закупки → один PDF --------------------------------------
+app.post('/api/tenders/:id/documents', (req, res) => {
+  try {
+    res.status(202).json(documents.start(req.params.id));
+  } catch (err) {
+    res.status(err instanceof DocumentsError ? 404 : 500).json({ error: err.message });
+  }
+});
+
+app.get('/api/tenders/:id/documents', (req, res) => {
+  const job = documents.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Документы ещё не извлекались' });
+  res.json({ ...job, pdf: Boolean(documents.pdfFile(req.params.id)) });
+});
+
+app.get('/api/tenders/:id/documents.pdf', (req, res) => {
+  const file = documents.pdfFile(req.params.id);
+  if (!file) return res.status(404).json({ error: 'PDF ещё не собран' });
+  const number = store.tenders[req.params.id]?.number || 'tender';
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `inline; filename="documents-${number.replace(/[^\w-]/g, '')}.pdf"; filename*=UTF-8''${encodeURIComponent(`Документы ${number}.pdf`)}`);
+  res.sendFile(file);
+});
+
+app.get('/api/tenders/:id/documents/original/:index', (req, res) => {
+  const found = documents.originalFile(req.params.id, req.params.index);
+  if (!found) return res.status(404).json({ error: 'Файл не найден' });
+  res.download(found.file, found.name);
 });
 
 app.post('/api/tenders/mark-all-seen', (_req, res) => {

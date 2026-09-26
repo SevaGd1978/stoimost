@@ -238,3 +238,15 @@ select.input { appearance: none; }
 .note-input { width: 100%; resize: vertical; min-height: 44px; font: inherit; font-size: 13px; }
 .note-status { position: absolute; right: 10px; bottom: 6px; font-size: 11px; color: var(--accent); }
 .tender-note-view { margin-top: 6px; font-size: 12.5px; color: #ffe3a1; white-space: pre-wrap; }
+.tender-docs { margin-top: 8px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tender-docs a.btn { text-decoration: none; }
+.docs-progress { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--accent-2); }
+.docs-error { font-size: 12.5px; color: var(--danger); flex-basis: 100%; }
+.docs-at { font-size: 11.5px; }
+.docs-list { flex-basis: 100%; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; }
+.docs-list ul { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.docs-list li { display: flex; gap: 6px; }
+.docs-list .doc-mark { width: 18px; flex: none; text-align: center; }
+.docs-list .doc-error { color: #ffb3b3; }
+.docs-originals a { color: var(--accent-2); }
+.tender-note-view a { color: var(--accent-2); }

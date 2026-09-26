@@ -1,4 +1,19 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
+
+# LibreOffice без графического интерфейса переводит документацию закупок (Word, Excel, RTF, HTML) в PDF,
+# шрифты Liberation/Carlito/Caladea метрически совместимы с Times New Roman, Arial, Calibri и Cambria,
+# unar распаковывает ZIP/RAR/7z (имена файлов из Windows-архивов — в CP866).
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    libreoffice-writer-nogui \
+    libreoffice-calc-nogui \
+    fonts-dejavu-core \
+    fonts-liberation \
+    fonts-crosextra-carlito \
+    fonts-crosextra-caladea \
+    unar \
+    ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

@@ -177,10 +177,16 @@
           <div class="tender-why">${t.matches.map(whyChip).join('')}</div>
           ${
             inFavorites
-              ? `<div class="tender-note"><textarea class="input note-input" rows="2" maxlength="2000" placeholder="Заметка: что уточнить, решение, контакты заказчика…">${esc(t.comment || '')}</textarea><span class="note-status"></span></div>`
+              ? `<div class="tender-note"><textarea class="input note-input" rows="2" maxlength="2000" placeholder="Заметка: что уточнить, решение, контакты заказчика…">${esc(t.comment || '')}</textarea><span class="note-status"></span></div>
+                 <div class="tender-docs" data-docs>${renderDocs(t)}</div>`
               : t.comment
                 ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>`
                 : ''
+          }
+          ${
+            !inFavorites && t.documents?.state === 'done'
+              ? `<div class="tender-note-view"><a href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">📑 Документы в PDF · ${t.documents.pages} стр.</a></div>`
+              : ''
           }
         </div>
         <div class="tender-right">
@@ -193,6 +199,53 @@
           </div>
         </div>
       </article>`;
+  }
+
+  function docsUrl(t, suffix = '') {
+    return `/api/tenders/${encodeURIComponent(t.id)}/documents${suffix}`;
+  }
+
+  function renderDocs(t) {
+    const d = t.documents;
+    if (d?.state === 'running') {
+      return `<span class="docs-progress"><span class="spinner"></span> ${esc(d.step || 'Извлекаем документы…')}</span>`;
+    }
+    const extract = (label) =>
+      `<button class="btn btn-sm" data-act="docs" title="Скачать документацию закупки из ЕИС и собрать её в один PDF">${label}</button>`;
+    if (d?.state === 'done') {
+      return `
+        <a class="btn btn-sm btn-primary" href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">📑 Открыть PDF · ${d.pages} стр.</a>
+        ${extract('🔄 Обновить')}
+        <button class="btn btn-sm btn-ghost" data-act="docs-list">Состав: ${d.files} док.${d.skipped ? `, пропущено ${d.skipped}` : ''}</button>
+        <span class="muted docs-at">${fmtDateTime(d.at)}</span>
+        <div class="docs-list" hidden></div>`;
+    }
+    if (d?.state === 'error') {
+      return `${extract('📄 Извлечь документы')}<span class="docs-error">${esc(d.error || 'Не удалось извлечь документы')}</span>`;
+    }
+    return extract('📄 Извлечь документы');
+  }
+
+  const DOC_STATUS = { ok: '✓', truncated: '✂️', skipped: '—', error: '⚠️' };
+
+  function renderDocsList(t, m) {
+    const files = m.files
+      .map(
+        (f) => `<li class="doc-${f.status}"><span class="doc-mark">${DOC_STATUS[f.status] || ''}</span>
+          <span>${esc(f.name)}${f.from ? ` <small class="muted">из ${esc(f.from)}</small>` : ''}${f.pages ? ` <small class="muted">· с ${f.startPage + (m.coverPages || 0)}-й стр., ${f.pages} стр.</small>` : ''}${f.note ? `<br><small class="muted">${esc(f.note)}</small>` : ''}</span></li>`,
+      )
+      .join('');
+    const originals = (m.originals || [])
+      .map((o) => `<a href="${docsUrl(t, `/original/${o.index}`)}" download>${esc(o.name)}</a>`)
+      .join(' · ');
+    const notes = (m.notes || []).map((n) => `<div><small class="muted">${esc(n)}</small></div>`).join('');
+    return `<ul>${files}</ul>${notes}${originals ? `<div class="docs-originals"><small class="muted">Оригиналы из ЕИС:</small> ${originals}</div>` : ''}`;
+  }
+
+  function updateDocsBlock(id) {
+    const t = findTender(id);
+    const box = $(`#fav-list .tender[data-id="${CSS.escape(id)}"] [data-docs]`);
+    if (t && box) box.innerHTML = renderDocs(t);
   }
 
   function renderFeed() {
@@ -213,6 +266,8 @@
       if (!btn) return;
       const t = findTender(btn.closest('.tender').dataset.id);
       if (!t) return;
+      if (btn.dataset.act === 'docs') return extractDocs(t);
+      if (btn.dataset.act === 'docs-list') return toggleDocsList(t, btn);
       const patch =
         btn.dataset.act === 'favorite' ? { favorite: !t.favorite } : btn.dataset.act === 'seen' ? { seen: !t.seen } : { archived: !t.archived, seen: true };
       try {
@@ -231,6 +286,30 @@
       const t = findTender(a.closest('.tender').dataset.id);
       if (t && !t.seen) api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { seen: true } }).then(refreshLists);
     });
+  }
+
+  async function extractDocs(t) {
+    try {
+      const job = await api(docsUrl(t), { method: 'POST' });
+      t.documents = { state: job.state, step: job.step };
+      updateDocsBlock(t.id);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }
+
+  async function toggleDocsList(t, btn) {
+    const box = btn.parentElement.querySelector('.docs-list');
+    if (!box.hidden) {
+      box.hidden = true;
+      return;
+    }
+    try {
+      box.innerHTML = renderDocsList(t, await api(docsUrl(t)));
+      box.hidden = false;
+    } catch (err) {
+      toast(err.message, 'err');
+    }
   }
 
   // ---------- избранное ----------
@@ -679,6 +758,18 @@
       if (run.trigger === 'timer' && added.length) toast(`Автоопрос: ${added.length} новых закупок`, 'ok');
     });
     es.addEventListener('cards:done', () => refreshLists().catch(() => {}));
+    es.addEventListener('documents', (e) => {
+      const d = JSON.parse(e.data);
+      const t = findTender(d.tenderId);
+      if (d.state === 'running') {
+        if (t) t.documents = { ...t.documents, state: 'running', step: d.step };
+        updateDocsBlock(d.tenderId);
+        return;
+      }
+      if (d.state === 'done') toast(`Документы собраны в PDF: ${d.pages} стр.`, 'ok');
+      else toast(d.error || 'Не удалось извлечь документы', 'err');
+      loadFavorites().catch(() => {});
+    });
     es.onerror = () => {
       es.close();
       setTimeout(connectEvents, 5000);
