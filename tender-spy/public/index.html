@@ -43,6 +43,7 @@
 
       <nav class="nav">
         <button class="nav-item active" data-view="feed">📡 Лента <span class="nav-badge" id="badge-unseen" hidden>0</span></button>
+        <button class="nav-item" data-view="favorites">⭐ Избранное <span class="nav-badge fav-badge" id="badge-fav" hidden>0</span></button>
         <button class="nav-item" data-view="watchlist">🎯 Наблюдение</button>
         <button class="nav-item" data-view="analytics">📊 Аналитика</button>
         <button class="nav-item" data-view="settings">⚙️ Настройки</button>
@@ -141,6 +142,37 @@
           <div class="empty-icon">🔍</div>
           <h3>Пока пусто</h3>
           <p>Добавьте номенклатуру в разделе «Наблюдение», затем нажмите «Опросить сейчас».</p>
+        </div>
+      </section>
+
+      <!-- ИЗБРАННОЕ -->
+      <section class="view" id="view-favorites" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Избранное</h1>
+            <p class="muted" id="fav-summary">Закупки, отобранные для дальнейшего рассмотрения</p>
+          </div>
+          <div class="head-actions">
+            <a class="btn btn-ghost" id="btn-fav-csv" href="/api/tenders.csv?favorite=1&amp;archived=any&amp;sort=favorited" download>📤 CSV</a>
+          </div>
+        </header>
+
+        <div class="filters">
+          <input class="input" id="fv-q" type="search" placeholder="Поиск по избранному и заметкам…" />
+          <select class="input" id="fv-sort">
+            <option value="favorited">Сначала добавленные недавно</option>
+            <option value="deadline">По сроку подачи</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="price_asc">Цена ↑</option>
+          </select>
+          <label class="chip"><input type="checkbox" id="fv-open" /> только открытые</label>
+        </div>
+
+        <div class="list" id="fav-list"></div>
+        <div class="empty" id="fav-empty" hidden>
+          <div class="empty-icon">⭐</div>
+          <h3>В избранном пока пусто</h3>
+          <p>В ленте нажмите «☆ В избранное» на карточке закупки — она появится здесь вместе с полем для заметок.</p>
         </div>
       </section>
 

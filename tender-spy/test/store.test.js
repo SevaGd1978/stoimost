@@ -70,6 +70,29 @@ test('Store.prune удаляет устаревшие, кроме избранн
   assert.ok(store.tenders['notice:fav']);
 });
 
+test('Store.patchTender: избранное помнит дату добавления, заметка обрезается и сохраняется', () => {
+  const file = tmpFile();
+  const store = new Store(file);
+  store.upsertTender(sample('notice:1'));
+  store.patchTender('notice:1', { favorite: true, comment: '  уточнить диаметр  ' });
+  const t = store.tenders['notice:1'];
+  assert.equal(t.favorite, true);
+  assert.ok(Date.parse(t.favoritedAt) > 0);
+  assert.equal(t.comment, 'уточнить диаметр');
+  const first = t.favoritedAt;
+  store.patchTender('notice:1', { favorite: true });
+  assert.equal(t.favoritedAt, first, 'повторное добавление не сдвигает дату');
+  store.patchTender('notice:1', { comment: 'x'.repeat(3000), stage: 'взлом' });
+  assert.equal(t.comment.length, 2000);
+  assert.equal(t.stage, 'Подача заявок', 'посторонние поля не меняются');
+  store.save();
+  assert.equal(new Store(file).tenders['notice:1'].favoritedAt, first);
+  store.patchTender('notice:1', { favorite: false, comment: '' });
+  assert.equal(t.favorite, false);
+  assert.equal('favoritedAt' in t, false);
+  assert.equal('comment' in t, false);
+});
+
 test('Scheduler.runOnce: фильтрует закрытые при onlyOpen, считает новые, шлёт в Telegram', async () => {
   const store = new Store(tmpFile());
   store.addNomenclature({ keyword: 'труба' });

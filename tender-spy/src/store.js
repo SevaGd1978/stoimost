@@ -348,8 +348,19 @@ export class Store {
   patchTender(id, patch) {
     const t = this.tenders[id];
     if (!t) return null;
-    const allowed = ['seen', 'favorite', 'archived', 'comment'];
-    for (const k of allowed) if (k in patch) t[k] = patch[k];
+    if ('seen' in patch) t.seen = Boolean(patch.seen);
+    if ('archived' in patch) t.archived = Boolean(patch.archived);
+    if ('favorite' in patch) {
+      const fav = Boolean(patch.favorite);
+      if (fav && !t.favorite) t.favoritedAt = new Date().toISOString();
+      if (!fav) delete t.favoritedAt;
+      t.favorite = fav;
+    }
+    if ('comment' in patch) {
+      const comment = String(patch.comment ?? '').trim().slice(0, 2000);
+      if (comment) t.comment = comment;
+      else delete t.comment;
+    }
     this.scheduleSave();
     return t;
   }

@@ -13,6 +13,7 @@
     status: null,
     stats: null,
     tenders: [],
+    favorites: [],
     browserNotify: localStorage.getItem('ts.browserNotify') === '1',
   };
 
@@ -50,6 +51,7 @@
   function showView(name) {
     $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+    if (name === 'favorites') loadFavorites().catch((e) => toast(e.message, 'err'));
     if (name === 'watchlist') loadQueries();
     if (name === 'analytics') loadAnalytics();
     if (name === 'log') loadRuns();
@@ -78,6 +80,9 @@
     $('#s-unseen').textContent = stats?.unseen ?? 0;
     $('#s-contracts').textContent = stats?.contracts ?? 0;
     $('#s-fav').textContent = stats?.favorites ?? 0;
+    const favBadge = $('#badge-fav');
+    favBadge.hidden = !(stats?.favorites > 0);
+    favBadge.textContent = stats?.favorites ?? 0;
     const badge = $('#badge-unseen');
     badge.hidden = !(stats?.unseen > 0);
     badge.textContent = stats?.unseen ?? 0;
@@ -145,7 +150,7 @@
       .join('');
   }
 
-  function renderTender(t) {
+  function renderTender(t, { inFavorites = false } = {}) {
     const left = daysLeft(t.deadlineAt);
     const dlClass = left == null ? '' : left < 0 ? 'over' : left <= 3 ? 'soon' : '';
     const dlText = t.deadlineAt ? (t.kind === 'contract' ? `исполнение до ${fmtDate(t.deadlineAt)}` : left < 0 ? `подача завершена ${fmtDate(t.deadlineAt)}` : `подача до ${fmtDate(t.deadlineAt)} (${left} дн.)`) : '';
@@ -170,12 +175,19 @@
             ${t.region ? `<span>${esc(t.region)}</span>` : ''}
           </div>
           <div class="tender-why">${t.matches.map(whyChip).join('')}</div>
+          ${
+            inFavorites
+              ? `<div class="tender-note"><textarea class="input note-input" rows="2" maxlength="2000" placeholder="Заметка: что уточнить, решение, контакты заказчика…">${esc(t.comment || '')}</textarea><span class="note-status"></span></div>`
+              : t.comment
+                ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>`
+                : ''
+          }
         </div>
         <div class="tender-right">
           <div class="price">${fmtPrice(t.price)} <small>₽</small></div>
           <div class="deadline ${dlClass}">${esc(dlText)}</div>
           <div class="tender-actions">
-            <button class="btn btn-sm btn-icon fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="В избранное">★</button>
+            <button class="btn btn-sm fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="${t.favorite ? 'Убрать из избранного' : 'Отложить для дальнейшего рассмотрения'}">${t.favorite ? '★ В избранном' : '☆ В избранное'}</button>
             <button class="btn btn-sm btn-icon" data-act="seen" title="${t.seen ? 'Отметить как новое' : 'Прочитано'}">${t.seen ? '↺' : '✓'}</button>
             <button class="btn btn-sm btn-icon" data-act="archive" title="${t.archived ? 'Вернуть из архива' : 'В архив'}">${t.archived ? '📤' : '🗄️'}</button>
           </div>
@@ -189,30 +201,85 @@
     $('#feed-empty').hidden = state.tenders.length > 0;
   }
 
-  $('#feed-list').addEventListener('click', async (e) => {
-    const btn = e.target.closest('button[data-act]');
-    if (!btn) return;
-    const card = btn.closest('.tender');
-    const t = state.tenders.find((x) => x.id === card.dataset.id);
+  function findTender(id) {
+    return state.tenders.find((x) => x.id === id) || state.favorites.find((x) => x.id === id);
+  }
+
+  const refreshLists = () => Promise.all([loadFeed(), loadFavorites(), loadState()]);
+
+  for (const listSel of ['#feed-list', '#fav-list']) {
+    $(listSel).addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const t = findTender(btn.closest('.tender').dataset.id);
+      if (!t) return;
+      const patch =
+        btn.dataset.act === 'favorite' ? { favorite: !t.favorite } : btn.dataset.act === 'seen' ? { seen: !t.seen } : { archived: !t.archived, seen: true };
+      try {
+        await api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: patch });
+        if (btn.dataset.act === 'favorite') toast(patch.favorite ? 'Добавлено в «Избранное»' : 'Убрано из «Избранного»', 'ok');
+        await refreshLists();
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    });
+
+    // клик по ссылке — считаем прочитанным
+    $(listSel).addEventListener('click', (e) => {
+      const a = e.target.closest('.tender-title a');
+      if (!a) return;
+      const t = findTender(a.closest('.tender').dataset.id);
+      if (t && !t.seen) api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { seen: true } }).then(refreshLists);
+    });
+  }
+
+  // ---------- избранное ----------
+  function favoriteParams() {
+    const p = new URLSearchParams({ favorite: '1', archived: 'any', sort: $('#fv-sort').value, limit: '1000' });
+    const q = $('#fv-q').value.trim();
+    if (q) p.set('q', q);
+    if ($('#fv-open').checked) p.set('onlyOpen', '1');
+    return p;
+  }
+
+  async function loadFavorites() {
+    const p = favoriteParams();
+    const data = await api(`/api/tenders?${p}`);
+    state.favorites = data.items;
+    $('#btn-fav-csv').href = `/api/tenders.csv?${p}`;
+    const filtered = p.has('q') || p.has('onlyOpen');
+    $('#fav-summary').textContent = data.total
+      ? `${filtered ? 'Найдено' : 'Отобрано для дальнейшего рассмотрения'}: ${data.total}`
+      : 'Закупки, отобранные для дальнейшего рассмотрения';
+    // Не перерисовываем список, пока пользователь печатает заметку.
+    if (document.activeElement?.classList.contains('note-input') && $('#fav-list').contains(document.activeElement)) return;
+    $('#fav-list').innerHTML = state.favorites.map((t) => renderTender(t, { inFavorites: true })).join('');
+    $('#fav-empty').hidden = state.favorites.length > 0;
+    $('#fav-empty h3').textContent = filtered ? 'Ничего не найдено' : 'В избранном пока пусто';
+  }
+
+  $('#fav-list').addEventListener('change', async (e) => {
+    const input = e.target.closest('.note-input');
+    if (!input) return;
+    const t = findTender(input.closest('.tender').dataset.id);
     if (!t) return;
-    const patch =
-      btn.dataset.act === 'favorite' ? { favorite: !t.favorite } : btn.dataset.act === 'seen' ? { seen: !t.seen } : { archived: !t.archived, seen: true };
+    const status = input.parentElement.querySelector('.note-status');
     try {
-      await api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: patch });
-      await Promise.all([loadFeed(), loadState()]);
+      const saved = await api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { comment: input.value } });
+      t.comment = saved.comment;
+      status.textContent = 'сохранено';
+      setTimeout(() => (status.textContent = ''), 2000);
     } catch (err) {
       toast(err.message, 'err');
     }
   });
 
-  // клик по ссылке — считаем прочитанным
-  $('#feed-list').addEventListener('click', (e) => {
-    const a = e.target.closest('.tender-title a');
-    if (!a) return;
-    const card = a.closest('.tender');
-    const t = state.tenders.find((x) => x.id === card.dataset.id);
-    if (t && !t.seen) api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { seen: true } }).then(() => Promise.all([loadFeed(), loadState()]));
+  let favTimer;
+  $('#fv-q').addEventListener('input', () => {
+    clearTimeout(favTimer);
+    favTimer = setTimeout(() => loadFavorites().catch((e) => toast(e.message, 'err')), 200);
   });
+  ['#fv-sort', '#fv-open'].forEach((s) => $(s).addEventListener('change', () => loadFavorites().catch((e) => toast(e.message, 'err'))));
 
   let feedTimer;
   const debouncedFeed = () => {
@@ -611,7 +678,7 @@
       }
       if (run.trigger === 'timer' && added.length) toast(`Автоопрос: ${added.length} новых закупок`, 'ok');
     });
-    es.addEventListener('cards:done', () => Promise.all([loadState(), loadFeed()]).catch(() => {}));
+    es.addEventListener('cards:done', () => refreshLists().catch(() => {}));
     es.onerror = () => {
       es.close();
       setTimeout(connectEvents, 5000);
@@ -625,7 +692,7 @@
       await loadFeed();
       connectEvents();
       const view = location.hash.replace('#', '');
-      if (['feed', 'watchlist', 'analytics', 'settings', 'log'].includes(view)) showView(view);
+      if (['feed', 'favorites', 'watchlist', 'analytics', 'settings', 'log'].includes(view)) showView(view);
       else if (!state.watchlist.nomenclature.length) showView('watchlist');
     } catch (err) {
       toast(`Не удалось загрузить: ${err.message}`, 'err');

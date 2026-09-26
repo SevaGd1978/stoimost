@@ -230,3 +230,11 @@ select.input { appearance: none; }
 }
 
 #set-minus { width: 100%; resize: vertical; font-family: inherit; }
+
+.nav-badge.fav-badge { background: var(--gold); color: #2a1f00; }
+.tender-actions .fav { white-space: nowrap; }
+.tender-actions .fav.active { border-color: rgba(255, 209, 102, 0.5); }
+.tender-note { margin-top: 8px; position: relative; }
+.note-input { width: 100%; resize: vertical; min-height: 44px; font: inherit; font-size: 13px; }
+.note-status { position: absolute; right: 10px; bottom: 6px; font-size: 11px; color: var(--accent); }
+.tender-note-view { margin-top: 6px; font-size: 12.5px; color: #ffe3a1; white-space: pre-wrap; }

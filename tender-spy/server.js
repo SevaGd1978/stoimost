@@ -220,12 +220,12 @@ function filterTenders(query) {
   const onlyNew = query.onlyNew === '1';
   const onlyOpen = query.onlyOpen === '1';
   const favorite = query.favorite === '1';
-  const archived = query.archived === '1';
+  const archived = query.archived === 'any' ? null : query.archived === '1';
   let minPrice = parsePriceBound(query.minPrice);
   let maxPrice = parsePriceBound(query.maxPrice);
   if (minPrice != null && maxPrice != null && minPrice > maxPrice) [minPrice, maxPrice] = [maxPrice, minPrice];
 
-  let list = Object.values(store.tenders).filter((t) => Boolean(t.archived) === archived);
+  let list = Object.values(store.tenders).filter((t) => archived === null || Boolean(t.archived) === archived);
   // «По текущим настройкам»: позиции, которых уже нет в номенклатуре, другой закон или цена,
   // минус-слова и уточняющие слова — всё, что отсёк бы сегодняшний опрос.
   if (query.actual === '1') {
@@ -262,7 +262,7 @@ function filterTenders(query) {
   if (minPrice != null || maxPrice != null) list = list.filter((t) => priceInRange(t.price, minPrice, maxPrice));
   if (q) {
     list = list.filter((t) =>
-      keywordMatches(q, `${t.title} ${t.customer ?? ''} ${t.supplier ?? ''} ${t.number}`) ||
+      keywordMatches(q, `${t.title} ${t.customer ?? ''} ${t.supplier ?? ''} ${t.number} ${t.comment ?? ''}`) ||
       t.number.includes(q) ||
       Boolean(t.platformNumber?.includes(q)),
     );
@@ -275,6 +275,7 @@ function filterTenders(query) {
     deadline: (a, b) => Date.parse(a.deadlineAt ?? '2999-01-01') - Date.parse(b.deadlineAt ?? '2999-01-01'),
     price_desc: (a, b) => (b.price ?? -1) - (a.price ?? -1),
     price_asc: (a, b) => (a.price ?? Infinity) - (b.price ?? Infinity),
+    favorited: (a, b) => Date.parse(b.favoritedAt ?? 0) - Date.parse(a.favoritedAt ?? 0),
   };
   list.sort(by[sort] ?? by.fresh);
   return list;
@@ -291,7 +292,7 @@ app.get('/api/tenders.csv', (req, res) => {
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const names = Object.fromEntries([['zakupki', 'ЕИС'], ...PLATFORMS.map((p) => [p.id, p.name])]);
   const sourcesOf = (t) => Object.keys(t.links && Object.keys(t.links).length ? t.links : { [t.source || 'zakupki']: 1 }).map((id) => names[id] || id).join(', ');
-  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Регион', 'Поставщик', 'Цена', 'Этап', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Ссылка'];
+  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Регион', 'Поставщик', 'Цена', 'Этап', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Заметка', 'Ссылка'];
   const rows = list.map((t) =>
     [
       t.kind === 'contract' ? 'Контракт' : 'Извещение',
@@ -307,6 +308,7 @@ app.get('/api/tenders.csv', (req, res) => {
       t.deadlineAt ? t.deadlineAt.slice(0, 10) : '',
       t.matches.map((m) => (m.type === 'company' ? `ИНН ${m.ref} ${m.label}` : m.label)).join('; '),
       sourcesOf(t),
+      t.comment,
       t.url,
     ]
       .map(esc)
