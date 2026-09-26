@@ -60,7 +60,7 @@
   // ---------- state ----------
   async function loadState() {
     const s = await api('/api/state');
-    Object.assign(state, { mode: s.mode, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun });
+    Object.assign(state, { mode: s.mode, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun, facets: s.facets || {} });
     renderStatus();
     renderWatchlist();
     renderSettings();
@@ -109,6 +109,12 @@
     if ($('#f-open').checked) p.set('onlyOpen', '1');
     if ($('#f-fav').checked) p.set('favorite', '1');
     if ($('#f-arch').checked) p.set('archived', '1');
+    if ($('#f-actual').checked) p.set('actual', '1');
+    for (const [id, key] of [['#f-region', 'region'], ['#f-subject', 'subject'], ['#f-ctype', 'ctype'], ['#f-method', 'method'], ['#f-smp', 'smp'], ['#f-published', 'published']]) {
+      if ($(id).value) p.set(key, $(id).value);
+    }
+    const minDays = $('#f-mindays').value.trim();
+    if (minDays && Number(minDays) > 0) p.set('minDays', minDays);
     return p;
   }
 
@@ -213,8 +219,10 @@
     clearTimeout(feedTimer);
     feedTimer = setTimeout(() => loadFeed().catch((e) => toast(e.message, 'err')), 200);
   };
-  ['#f-q', '#f-min', '#f-max'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
-  ['#f-nomen', '#f-kind', '#f-law', '#f-source', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch'].forEach((s) => $(s).addEventListener('change', debouncedFeed));
+  ['#f-q', '#f-min', '#f-max', '#f-mindays'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
+  ['#f-nomen', '#f-kind', '#f-law', '#f-source', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch', '#f-actual', '#f-region', '#f-subject', '#f-ctype', '#f-method', '#f-smp', '#f-published'].forEach((s) =>
+    $(s).addEventListener('change', debouncedFeed),
+  );
 
   $('#btn-mark-seen').addEventListener('click', async () => {
     const r = await api('/api/tenders/mark-all-seen', { method: 'POST' });
@@ -240,6 +248,17 @@
       '<option value="all">Все площадки</option><option value="zakupki">ЕИС</option>' +
       state.platforms.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
     ss.value = [...ss.options].some((o) => o.value === curS) ? curS : 'all';
+    const f = state.facets || {};
+    fillSelect('#f-region', 'Все регионы', (f.regions || []).map((r) => [r, r]));
+    fillSelect('#f-ctype', 'Любой заказчик', Object.entries(f.customerTypes || {}));
+    fillSelect('#f-method', 'Любой способ', Object.entries(f.methods || {}));
+  }
+
+  function fillSelect(sel, allLabel, options) {
+    const el = $(sel);
+    const cur = el.value;
+    el.innerHTML = `<option value="">${esc(allLabel)}</option>` + options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
+    el.value = options.some(([v]) => v === cur) ? cur : '';
   }
 
   // ---------- наблюдение ----------
@@ -251,8 +270,9 @@
         <div class="item" data-id="${esc(n.id)}">
           <div class="item-main">
             <div class="item-title">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</div>
-            <div class="item-sub">${n.okpd2 ? `ОКПД2 <code>${esc(n.okpd2)}</code>` : 'полнотекстовый поиск'}</div>
+            <div class="item-sub">${n.okpd2 ? `ОКПД2 <code>${esc(n.okpd2)}</code>` : 'полнотекстовый поиск'}${n.context?.length ? ` · в названии одно из: ${esc(n.context.join(', '))}` : ''}</div>
           </div>
+          <button class="btn btn-sm" data-act="context" title="Уточняющие слова">✏️</button>
           <button class="btn btn-sm" data-act="feed" title="Показать в ленте">📡</button>
           <button class="btn btn-sm btn-danger" data-act="del" title="Удалить">✕</button>
         </div>`,
@@ -367,6 +387,19 @@
       await api(`/api/nomenclature/${n.id}`, { method: 'DELETE' });
       await loadState();
       loadQueries();
+    } else if (btn.dataset.act === 'context') {
+      const value = prompt(
+        `Уточняющие слова для «${n.keyword || n.okpd2}».\nВ названии закупки должно быть хотя бы одно из них. Через запятую; пусто — без условия.`,
+        (n.context || []).join(', '),
+      );
+      if (value === null) return;
+      try {
+        await api(`/api/nomenclature/${n.id}`, { method: 'PATCH', body: { context: value } });
+        toast('Уточняющие слова сохранены', 'ok');
+        await Promise.all([loadState(), loadFeed()]);
+      } catch (err) {
+        toast(err.message, 'err');
+      }
     } else {
       $('#f-nomen').value = n.keyword || n.okpd2;
       showView('feed');
@@ -389,6 +422,7 @@
     $('#set-onlyopen').checked = s.onlyOpen;
     $('#set-price-min').value = s.priceMin != null ? fmtPrice(s.priceMin) : '';
     $('#set-price-max').value = s.priceMax != null ? fmtPrice(s.priceMax) : '';
+    $('#set-minus').value = (s.minusWords || []).join(', ');
     $('#set-fz44').checked = s.laws.fz44;
     $('#set-fz223').checked = s.laws.fz223;
     $('#set-fz615').checked = s.laws.fz615;
@@ -413,13 +447,14 @@
           onlyOpen: $('#set-onlyopen').checked,
           priceMin: $('#set-price-min').value.trim() || null,
           priceMax: $('#set-price-max').value.trim() || null,
+          minusWords: $('#set-minus').value,
           searchContracts: false,
           laws: { fz44: $('#set-fz44').checked, fz223: $('#set-fz223').checked, fz615: $('#set-fz615').checked },
           platforms: Object.fromEntries($$('#set-platforms input[data-platform]').map((el) => [el.dataset.platform, el.checked])),
         },
       });
       toast('Настройки сохранены', 'ok');
-      await loadState();
+      await Promise.all([loadState(), loadFeed()]);
     } catch (err) {
       toast(err.message, 'err');
     }
@@ -576,6 +611,7 @@
       }
       if (run.trigger === 'timer' && added.length) toast(`Автоопрос: ${added.length} новых закупок`, 'ok');
     });
+    es.addEventListener('cards:done', () => Promise.all([loadState(), loadFeed()]).catch(() => {}));
     es.onerror = () => {
       es.close();
       setTimeout(connectEvents, 5000);

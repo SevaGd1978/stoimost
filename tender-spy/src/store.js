@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { parsePriceBound, staleNotice } from './tenders.js';
 import { PLATFORM_IDS } from './sources/platforms/index.js';
+import { DEFAULT_MINUS_WORDS, parseWordList } from './filters.js';
 
 const DB_VERSION = 1;
 const REMOVED_SALE_SOURCES = new Set(['torgi', 'rad']);
@@ -23,6 +24,8 @@ export function defaultSettings() {
     priceMax: null,
     /** Какие площадки опрашивать помимо ЕИС: { [id]: boolean }. */
     platforms: defaultPlatforms(),
+    /** Закупки, в названии которых есть такое слово (фраза — все её слова), не попадают в ленту. */
+    minusWords: [...DEFAULT_MINUS_WORDS],
   };
 }
 
@@ -179,14 +182,14 @@ export class Store {
     return this.companies.length !== before;
   }
 
-  addNomenclature({ keyword, okpd2 = '' }) {
+  addNomenclature({ keyword, okpd2 = '', context = [] }) {
     const kw = keyword.trim();
     const code = okpd2.trim();
     const exists = this.nomenclature.find(
       (n) => n.keyword.toLowerCase() === kw.toLowerCase() && n.okpd2 === code,
     );
     if (exists) return { item: exists, created: false };
-    const item = { id: newId('n_'), keyword: kw, okpd2: code, createdAt: new Date().toISOString() };
+    const item = { id: newId('n_'), keyword: kw, okpd2: code, context: parseWordList(context), createdAt: new Date().toISOString() };
     this.nomenclature.push(item);
     this.scheduleSave();
     return { item, created: true };
@@ -215,6 +218,7 @@ export class Store {
           id: newId('n_'),
           keyword: kw,
           okpd2: code,
+          context: parseWordList(item.context),
           createdAt: new Date().toISOString(),
         });
         added++;
@@ -222,6 +226,15 @@ export class Store {
     }
     if (added || replace) this.scheduleSave();
     return { added, skipped, total: this.nomenclature.length };
+  }
+
+  /** Уточняющие слова позиции: в названии закупки должно быть хотя бы одно из них. */
+  updateNomenclature(id, { context }) {
+    const item = this.nomenclature.find((n) => n.id === id);
+    if (!item) return null;
+    if (context !== undefined) item.context = parseWordList(context);
+    this.scheduleSave();
+    return item;
   }
 
   removeNomenclature(id) {
@@ -246,6 +259,7 @@ export class Store {
       nomenclature: this.nomenclature.map((n) => ({
         keyword: n.keyword,
         okpd2: n.okpd2,
+        ...(n.context?.length ? { context: n.context } : {}),
       })),
     };
   }
@@ -378,6 +392,29 @@ export class Store {
     return removed;
   }
 
+  /** Извещения ЕИС, для которых ещё не читали карточку (срок подачи, регион). */
+  noticesWithoutCard(limit = 20) {
+    return Object.values(this.tenders)
+      .filter((t) => t.kind === 'notice' && t.isOpen && !t.archived && (t.source || 'zakupki') === 'zakupki' && !t.cardAt && (t.cardAttempts || 0) < 3)
+      .sort((a, b) => Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt))
+      .slice(0, limit);
+  }
+
+  applyCard(id, card) {
+    const t = this.tenders[id];
+    if (!t) return null;
+    if (!card) {
+      t.cardAttempts = (t.cardAttempts || 0) + 1;
+      return t;
+    }
+    t.cardAt = new Date().toISOString();
+    if (card.deadlineAt) t.deadlineAt = card.deadlineAt;
+    if (card.region) t.region = card.region;
+    if (card.customerInn) t.customerInn ||= card.customerInn;
+    this.scheduleSave();
+    return t;
+  }
+
   closeStaleNotices(now = Date.now()) {
     let closed = 0;
     for (const t of Object.values(this.tenders)) {
@@ -439,6 +476,7 @@ export class Store {
         if (typeof patch.platforms[id] === 'boolean') s.platforms[id] = patch.platforms[id];
       }
     }
+    if ('minusWords' in patch) s.minusWords = parseWordList(patch.minusWords);
     if ('priceMin' in patch) s.priceMin = parsePriceBound(patch.priceMin);
     if ('priceMax' in patch) s.priceMax = parsePriceBound(patch.priceMax);
     if (s.priceMin != null && s.priceMax != null && s.priceMin > s.priceMax) {

@@ -13,6 +13,7 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createEisFetch, describeFetchError } from '../eis-tls.js';
 import { parseRss, parseDescriptionFields, pickField, stripHtml } from '../rss.js';
+import { parseNoticeCard } from './eis-card.js';
 import {
   parseRuNumber,
   parseRuDate,
@@ -211,7 +212,7 @@ export class ZakupkiSource {
     this.log = log;
   }
 
-  async fetchXml(url) {
+  async fetchXml(url, accept = 'application/rss+xml, application/xml, text/xml, */*') {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
     try {
@@ -219,7 +220,7 @@ export class ZakupkiSource {
         signal: ctrl.signal,
         headers: {
           'User-Agent': this.userAgent,
-          Accept: 'application/rss+xml, application/xml, text/xml, */*',
+          Accept: accept,
           'Accept-Language': 'ru-RU,ru;q=0.9',
         },
       };
@@ -232,6 +233,12 @@ export class ZakupkiSource {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /** Срок подачи, регион и ИНН заказчика из карточки извещения. */
+  async fetchNoticeCard(tender) {
+    const html = await this.fetchXml(tender.url, 'text/html,application/xhtml+xml,*/*;q=0.8');
+    return parseNoticeCard(html);
   }
 
   async runQuery(query) {

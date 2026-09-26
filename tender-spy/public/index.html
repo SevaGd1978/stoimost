@@ -111,6 +111,30 @@
           <label class="chip"><input type="checkbox" id="f-fav" /> ★ избранные</label>
           <label class="chip"><input type="checkbox" id="f-arch" /> архив</label>
         </div>
+        <div class="filters">
+          <select class="input" id="f-region"><option value="">Все регионы</option></select>
+          <select class="input" id="f-subject">
+            <option value="">Поставка и работы</option>
+            <option value="supply">Только поставка</option>
+            <option value="works">Только работы и услуги</option>
+          </select>
+          <select class="input" id="f-ctype"><option value="">Любой заказчик</option></select>
+          <select class="input" id="f-method"><option value="">Любой способ</option></select>
+          <select class="input" id="f-smp">
+            <option value="">СМП: все</option>
+            <option value="exclude">Без ограничения «только СМП»</option>
+            <option value="only">Только для СМП</option>
+          </select>
+          <select class="input" id="f-published">
+            <option value="">Размещено: когда угодно</option>
+            <option value="1">за сутки</option>
+            <option value="3">за 3 дня</option>
+            <option value="7">за неделю</option>
+            <option value="30">за месяц</option>
+          </select>
+          <input class="input price-input" id="f-mindays" type="number" min="0" max="90" placeholder="Осталось дней, от" title="Срок подачи не раньше чем через N дней. Закупки, у которых срок ещё не известен, показываются" />
+          <label class="chip" title="Скрыть закупки по удалённым позициям номенклатуры, по выключенным законам, с ценой вне диапазона, с минус-словами и без уточняющих слов"><input type="checkbox" id="f-actual" checked /> по текущим настройкам</label>
+        </div>
 
         <div class="list" id="feed-list"></div>
         <div class="empty" id="feed-empty" hidden>
@@ -146,6 +170,10 @@
                   <label>ОКПД2 <span class="hint">необязательно</span></label>
                   <input class="input" name="okpd2" placeholder="24.20.13" />
                 </div>
+              </div>
+              <div class="field">
+                <label>Уточняющие слова <span class="hint">необязательно; в названии закупки должно быть хотя бы одно, через запятую</span></label>
+                <input class="input" name="context" placeholder="труб, изоляц, скорлуп, отвод, фасон" />
               </div>
               <button class="btn btn-primary" type="submit">＋ Добавить позицию</button>
             </form>
@@ -252,6 +280,9 @@
                 <input class="input" id="set-price-max" inputmode="decimal" placeholder="5 000 000" autocomplete="off" />
               </div>
             </div>
+            <div class="card-title mt">🚫 Минус-слова</div>
+            <p class="muted small">Закупки, в названии которых есть такое слово, не попадают в ленту. Фраза отсекает, только если в названии есть все её слова. Через запятую или с новой строки.</p>
+            <textarea class="input" id="set-minus" rows="4" placeholder="запасные части, лекарственный препарат"></textarea>
             <div class="card-title mt">📜 Законы</div>
             <label class="switch"><input type="checkbox" id="set-fz44" /> 44-ФЗ (госзакупки)</label>
             <label class="switch"><input type="checkbox" id="set-fz223" /> 223-ФЗ (госкомпании, естественные монополии)</label>

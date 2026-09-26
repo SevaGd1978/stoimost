@@ -14,6 +14,18 @@ import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js'
 import { extraCaLabels } from './src/eis-tls.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
+import {
+  CUSTOMER_TYPES,
+  METHOD_GROUPS,
+  SUBJECTS,
+  currentMatches,
+  customerTypeOf,
+  isSmpOnly,
+  methodGroupOf,
+  rejectReason,
+  settingsAllow,
+  subjectOf,
+} from './src/filters.js';
 
 let proxyDispatcher = undefined;
 if (config.proxy && typeof fetch === 'function') {
@@ -69,6 +81,7 @@ function broadcast(event, data) {
 }
 scheduler.on('run:start', (d) => broadcast('run:start', d));
 scheduler.on('run:done', ({ run, added }) => broadcast('run:done', { run, added: added.map(brief) }));
+scheduler.on('cards:done', (d) => broadcast('cards:done', d));
 
 function brief(t) {
   return { id: t.id, title: t.title, customer: t.customer, price: t.price, url: t.url, law: t.law, matches: t.matches };
@@ -176,8 +189,21 @@ app.get('/api/state', (_req, res) => {
     stats: stats(),
     analytics: analytics(),
     lastRun: store.runs[0] ?? null,
+    facets: facets(),
   });
 });
+
+/** Варианты для фильтров ленты: регионы — только те, что есть в карточках. */
+function facets() {
+  const regions = new Set();
+  for (const t of Object.values(store.tenders)) if (t.region && !t.archived) regions.add(t.region);
+  return {
+    regions: [...regions].sort((a, b) => a.localeCompare(b, 'ru')),
+    subjects: SUBJECTS,
+    customerTypes: CUSTOMER_TYPES,
+    methods: METHOD_GROUPS,
+  };
+}
 
 app.get('/api/analytics', (_req, res) => {
   res.json(analytics());
@@ -200,6 +226,31 @@ function filterTenders(query) {
   if (minPrice != null && maxPrice != null && minPrice > maxPrice) [minPrice, maxPrice] = [maxPrice, minPrice];
 
   let list = Object.values(store.tenders).filter((t) => Boolean(t.archived) === archived);
+  // «По текущим настройкам»: позиции, которых уже нет в номенклатуре, другой закон или цена,
+  // минус-слова и уточняющие слова — всё, что отсёк бы сегодняшний опрос.
+  if (query.actual === '1') {
+    const ctx = { nomenclature: store.nomenclature, settings: store.settings };
+    list = list.filter(
+      (t) => t.favorite || (currentMatches(t, store.nomenclature).length && settingsAllow(t, store.settings) && !rejectReason(t, ctx)),
+    );
+  }
+  if (query.region) list = list.filter((t) => t.region === query.region);
+  if (SUBJECTS[query.subject]) list = list.filter((t) => subjectOf(t.title) === query.subject);
+  if (CUSTOMER_TYPES[query.ctype]) list = list.filter((t) => customerTypeOf(t) === query.ctype);
+  if (METHOD_GROUPS[query.method]) list = list.filter((t) => methodGroupOf(t) === query.method);
+  if (query.smp === 'only') list = list.filter((t) => isSmpOnly(t));
+  if (query.smp === 'exclude') list = list.filter((t) => !isSmpOnly(t));
+  const publishedDays = Number(query.published);
+  if (publishedDays > 0) {
+    const since = Date.now() - publishedDays * 86_400_000;
+    list = list.filter((t) => Date.parse(t.publishedAt ?? 0) >= since);
+  }
+  // Без известного срока подачи карточку оставляем: срок ещё не дочитан из ЕИС.
+  const minDays = Number(query.minDays);
+  if (minDays > 0) {
+    const until = Date.now() + minDays * 86_400_000;
+    list = list.filter((t) => t.kind !== 'notice' || !t.deadlineAt || Date.parse(t.deadlineAt) >= until);
+  }
   if (kind && kind !== 'all') list = list.filter((t) => t.kind === kind);
   if (law && law !== 'all') list = list.filter((t) => t.law === law);
   if (company) list = list.filter((t) => t.matches.some((m) => m.type === 'company' && m.ref === company));
@@ -240,7 +291,7 @@ app.get('/api/tenders.csv', (req, res) => {
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const names = Object.fromEntries([['zakupki', 'ЕИС'], ...PLATFORMS.map((p) => [p.id, p.name])]);
   const sourcesOf = (t) => Object.keys(t.links && Object.keys(t.links).length ? t.links : { [t.source || 'zakupki']: 1 }).map((id) => names[id] || id).join(', ');
-  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Поставщик', 'Цена', 'Этап', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Ссылка'];
+  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Регион', 'Поставщик', 'Цена', 'Этап', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Ссылка'];
   const rows = list.map((t) =>
     [
       t.kind === 'contract' ? 'Контракт' : 'Извещение',
@@ -248,6 +299,7 @@ app.get('/api/tenders.csv', (req, res) => {
       t.number,
       t.title,
       t.customer,
+      t.region,
       t.supplier,
       t.price ?? '',
       t.stage,
@@ -326,13 +378,20 @@ app.delete('/api/companies/:id', (req, res) => {
 
 // ---- watchlist: номенклатура ------------------------------------------------
 app.post('/api/nomenclature', (req, res) => {
+  const context = req.body?.context ?? '';
   const keyword = String(req.body?.keyword ?? '').trim();
   const okpd2 = String(req.body?.okpd2 ?? '').trim();
   if (!keyword && !okpd2) return res.status(400).json({ error: 'Укажите ключевые слова и/или код ОКПД2' });
   if (okpd2 && !/^\d{2}(\.\d{1,3})*$/.test(okpd2)) return res.status(400).json({ error: 'ОКПД2 должен выглядеть как 24.20.13' });
   if (keyword.length > 120) return res.status(400).json({ error: 'Слишком длинная фраза' });
-  const { item, created } = store.addNomenclature({ keyword, okpd2 });
+  const { item, created } = store.addNomenclature({ keyword, okpd2, context });
   res.status(created ? 201 : 200).json(item);
+});
+
+app.patch('/api/nomenclature/:id', (req, res) => {
+  const item = store.updateNomenclature(req.params.id, { context: req.body?.context });
+  if (!item) return res.status(404).json({ error: 'Позиция не найдена' });
+  res.json(item);
 });
 
 app.delete('/api/nomenclature/:id', (req, res) => {

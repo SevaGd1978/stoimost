@@ -11,6 +11,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { createEisFetch, describeFetchError } from '../../eis-tls.js';
 import { detectLaw, keywordMatches } from '../../tenders.js';
 import { PLATFORMS } from './index.js';
+import { regionFromText } from '../../regions.js';
 
 const NETWORK_ERROR = /таймаут|timeout|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|сертификат|socket|TLS/i;
 
@@ -94,7 +95,7 @@ export function toTender(platform, item, keyword) {
     deadlineAt: item.deadlineAt || null,
     stage: expired ? 'Приём заявок завершён' : item.stage || (isOpen === false ? 'Приём заявок завершён' : isOpen ? 'Приём заявок' : ''),
     isOpen,
-    region: item.region || null,
+    region: regionFromText(item.region) || item.region || null,
     url: item.url,
     links: item.url ? { [platform.id]: item.url } : {},
     matches: [{ type: 'keyword', ref: keyword, label: keyword, strong: true }],

@@ -8,6 +8,11 @@ export class CombinedSource {
     this.sources = sources;
   }
 
+  async fetchNoticeCard(tender) {
+    const src = this.sources.find((s) => typeof s.fetchNoticeCard === 'function');
+    return src ? src.fetchNoticeCard(tender) : null;
+  }
+
   async collect(args) {
     const results = await Promise.all(
       this.sources.map((s) =>

@@ -227,3 +227,5 @@ select.input { appearance: none; }
   .tender-right { align-items: flex-start; }
   .main { padding: 18px; }
 }
+
+#set-minus { width: 100%; resize: vertical; font-family: inherit; }
