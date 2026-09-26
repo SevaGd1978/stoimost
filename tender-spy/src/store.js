@@ -67,7 +67,7 @@ export class Store {
       this.dropPropertySales();
       this.closeStaleNotices();
       for (const t of Object.values(this.db.tenders)) {
-        const fromTitle = t.cardAt && regionFromText(t.title);
+        const fromTitle = (t.cardAt || !t.region) && regionFromText(t.title);
         if (fromTitle) t.region = fromTitle;
       }
       this.db.watchlist = {

@@ -266,3 +266,11 @@ test('toTender: номер ЕИС в поле номера площадки — 
   const own = toTender({ id: 'tektorg', category: 'purchase' }, { number: '19848909', title: 'Скорлупа ППУ', url: 'https://t/2' }, 'ППУ');
   assert.equal(own.id, 'tektorg:19848909');
 });
+
+test('toTender: регион из названия, если площадка его не дала', async () => {
+  const { toTender } = await import('../src/sources/platforms/source.js');
+  const t = toTender({ id: 'b2bcenter', category: 'purchase' }, { number: '4613943', title: 'Поставка изделий в ППУ изоляции для нужд Филиал «Владимирский» ПАО «Т Плюс»', url: 'https://b/1' }, 'ППУ');
+  assert.equal(t.region, 'Владимирская область');
+  const own = toTender({ id: 'tektorg', category: 'purchase' }, { number: '1', title: 'Скорлупа ППУ', region: 'Респ Башкортостан', url: 'https://t/1' }, 'ППУ');
+  assert.equal(own.region, 'Башкортостан');
+});

@@ -95,7 +95,7 @@ export function toTender(platform, item, keyword) {
     deadlineAt: item.deadlineAt || null,
     stage: expired ? 'Приём заявок завершён' : item.stage || (isOpen === false ? 'Приём заявок завершён' : isOpen ? 'Приём заявок' : ''),
     isOpen,
-    region: regionFromText(item.region) || item.region || null,
+    region: regionFromText(item.region) || item.region || regionFromText(title),
     url: item.url,
     links: item.url ? { [platform.id]: item.url } : {},
     matches: [{ type: 'keyword', ref: keyword, label: keyword, strong: true }],
