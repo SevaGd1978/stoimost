@@ -56,8 +56,14 @@
         <div class="status-row"><span>Последний опрос</span><b id="st-last">—</b></div>
         <div class="status-row"><span>Следующий</span><b id="st-next">—</b></div>
         <div class="status-row"><span>Telegram</span><b id="st-tg">—</b></div>
-        <button class="btn btn-primary btn-block" id="btn-scan">🔄 Опросить сейчас</button>
+        <button class="btn btn-primary btn-block admin-only" id="btn-scan">🔄 Опросить сейчас</button>
         <div class="scan-progress" id="scan-progress" hidden><span class="spinner"></span> Запросы к ЕИС…</div>
+      </div>
+
+      <div class="side-card" id="account-card">
+        <div class="side-card-title">Учётная запись</div>
+        <div class="status-row"><span id="acc-name">—</span><b id="acc-role">—</b></div>
+        <button class="btn btn-ghost btn-block" id="btn-logout" type="button">Выйти</button>
       </div>
 
       <div class="side-card stats">
@@ -77,8 +83,8 @@
             <p class="muted" id="feed-summary">Закупки, попавшие под вашу номенклатуру</p>
           </div>
           <div class="head-actions">
-            <button class="btn btn-ghost" id="btn-mark-seen">✓ Всё прочитано</button>
-            <button class="btn btn-ghost" id="btn-archive-old" title="Просмотренные и закрытые закупки уйдут в архив. Избранные и новые открытые останутся">🧹 Очистить просмотренные и старые</button>
+            <button class="btn btn-ghost admin-only" id="btn-mark-seen">✓ Всё прочитано</button>
+            <button class="btn btn-ghost admin-only" id="btn-archive-old" title="Просмотренные и закрытые закупки уйдут в архив. Избранные и новые открытые останутся">🧹 Очистить просмотренные и старые</button>
             <a class="btn btn-ghost" id="btn-csv" href="/api/tenders.csv" download>📤 CSV</a>
           </div>
         </header>
@@ -185,15 +191,15 @@
             <p class="muted">Что искать в ЕИС и на площадках: ключевые слова и коды ОКПД2</p>
           </div>
           <div class="head-actions">
-            <button class="btn btn-ghost" id="btn-export-wl">📤 Экспорт JSON</button>
-            <button class="btn btn-ghost" id="btn-import-wl">📥 Импорт файла</button>
+            <button class="btn btn-ghost admin-only" id="btn-export-wl">📤 Экспорт JSON</button>
+            <button class="btn btn-ghost admin-only" id="btn-import-wl">📥 Импорт файла</button>
           </div>
         </header>
 
         <div class="grid-2">
           <div class="card">
             <div class="card-title">📦 Номенклатура</div>
-            <form class="form" id="form-nomen">
+            <form class="form admin-only" id="form-nomen">
               <div class="form-row">
                 <div class="field grow-2">
                   <label>Ключевые слова <span class="hint">как в поиске ЕИС</span></label>
@@ -323,13 +329,13 @@
             <div class="card-title mt">🏛 Площадки</div>
             <p class="muted small">ЕИС опрашивается всегда. Здесь — дополнительные открытые площадки, поиск по ключевым словам номенклатуры (позиции только с ОКПД2 на площадки не уходят).</p>
             <div id="set-platforms"></div>
-            <button class="btn btn-primary mt" id="btn-save-settings">💾 Сохранить</button>
+            <button class="btn btn-primary mt admin-only" id="btn-save-settings">💾 Сохранить</button>
           </div>
           <div class="card">
             <div class="card-title">🔔 Уведомления</div>
             <label class="switch"><input type="checkbox" id="set-browser" /> Уведомления браузера о новых закупках</label>
             <label class="switch"><input type="checkbox" id="set-telegram" /> Отправлять в Telegram <span class="hint" id="tg-hint"></span></label>
-            <div class="form-row mt-sm" id="tg-test-row">
+            <div class="form-row mt-sm admin-only" id="tg-test-row">
               <button class="btn btn-ghost btn-sm" id="btn-test-tg">Тест Telegram</button>
             </div>
             <p class="muted small">Для Telegram задайте переменные окружения <code>TELEGRAM_BOT_TOKEN</code> и <code>TELEGRAM_CHAT_ID</code> при запуске сервера.</p>
@@ -337,6 +343,53 @@
             <p class="muted small" id="source-note"></p>
             <p class="muted small">Поддержка исходящего прокси (HTTP/HTTPS/SOCKS5): задайте <code>HTTPS_PROXY=http://user:pass@host:port</code> при запуске.</p>
           </div>
+        </div>
+
+        <div class="card mt" id="password-card">
+          <div class="card-title">🔑 Мой пароль</div>
+          <form class="form" id="form-password">
+            <div class="form-row">
+              <div class="field grow">
+                <label>Текущий пароль</label>
+                <input class="input" name="current" type="password" autocomplete="current-password" required />
+              </div>
+              <div class="field grow">
+                <label>Новый пароль <span class="hint">от 8 символов</span></label>
+                <input class="input" name="next" type="password" autocomplete="new-password" required />
+              </div>
+            </div>
+            <button class="btn btn-primary" type="submit">Сменить пароль</button>
+          </form>
+        </div>
+
+        <div class="card mt admin-only" id="users-card">
+          <div class="card-title">👥 Пользователи</div>
+          <p class="muted small">Администратор меняет номенклатуру, настройки, запуск опроса и учётные записи. Сотрудник смотрит ленту и аналитику, ведёт избранное и заметки, извлекает документы.</p>
+          <form class="form" id="form-user">
+            <div class="form-row">
+              <div class="field grow">
+                <label>Логин <span class="hint">латиница</span></label>
+                <input class="input" name="login" required autocomplete="off" placeholder="ivanova" />
+              </div>
+              <div class="field grow">
+                <label>Имя</label>
+                <input class="input" name="name" placeholder="Иванова А.С." />
+              </div>
+              <div class="field grow">
+                <label>Пароль</label>
+                <input class="input" name="password" type="password" required autocomplete="new-password" />
+              </div>
+              <div class="field">
+                <label>Роль</label>
+                <select class="input" name="role">
+                  <option value="employee">Сотрудник</option>
+                  <option value="admin">Администратор</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-primary" type="submit">Добавить</button>
+          </form>
+          <div class="items" id="users-list"></div>
         </div>
       </section>
 

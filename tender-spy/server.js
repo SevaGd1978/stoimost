@@ -14,7 +14,9 @@ import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js'
 import { createEisFetch, extraCaLabels } from './src/eis-tls.js';
 import { DocumentService, DocumentsError } from './src/documents/service.js';
 import { tools as documentTools } from './src/documents/convert.js';
-import { basicAuth } from './src/auth.js';
+import { createAuth } from './src/auth.js';
+import { mountAuthRoutes } from './src/auth-routes.js';
+import { ensureBootstrapAdmin, tenderPatchFor } from './src/accounts.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 import {
@@ -44,6 +46,15 @@ if (config.proxy && typeof fetch === 'function') {
 
 const log = console;
 const store = new Store(config.dataFile);
+let bootAdmin = null;
+try {
+  bootAdmin = ensureBootstrapAdmin(store, { login: config.adminLogin, password: config.adminPassword });
+} catch (err) {
+  log.error(`[auth] администратор из переменной окружения не создан: ${err.message}`);
+}
+if (bootAdmin) log.info(`[auth] создан администратор «${bootAdmin.login}» из переменной окружения. Смените пароль в настройках.`);
+else if (!store.users.length) log.info('[auth] пользователей нет — при первом открытии сайта создайте администратора');
+const auth = createAuth({ store });
 
 const source =
   config.mode === 'demo'
@@ -77,11 +88,13 @@ const documents = new DocumentService({
 });
 
 const app = express();
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '3mb' }));
 
 // Health check для мониторинга облачных платформ (Amvera, k8s, docker)
 app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-app.use(basicAuth({ password: config.password, user: config.user, open: ['/health'] }));
+app.use(auth.attach);
+mountAuthRoutes(app, { store, auth, rootDir: config.rootDir });
 
 app.use(express.static(path.join(config.rootDir, 'public'), { extensions: ['html'] }));
 
@@ -197,9 +210,10 @@ function analytics() {
   };
 }
 
-app.get('/api/state', (_req, res) => {
+app.get('/api/state', (req, res) => {
   res.json({
     mode: config.mode,
+    user: req.user,
     platforms: platformInfo(),
     settings: store.settings,
     watchlist: { companies: store.companies, nomenclature: store.nomenclature },
@@ -339,7 +353,7 @@ app.get('/api/tenders.csv', (req, res) => {
 });
 
 app.patch('/api/tenders/:id', (req, res) => {
-  const t = store.patchTender(req.params.id, req.body ?? {});
+  const t = store.patchTender(req.params.id, tenderPatchFor(req.user?.role, req.body ?? {}));
   if (!t) return res.status(404).json({ error: 'Тендер не найден' });
   res.json(t);
 });
@@ -374,16 +388,16 @@ app.get('/api/tenders/:id/documents/original/:index', (req, res) => {
   res.download(found.file, found.name);
 });
 
-app.post('/api/tenders/mark-all-seen', (_req, res) => {
+app.post('/api/tenders/mark-all-seen', auth.requireAdmin, (_req, res) => {
   res.json({ marked: store.markAllSeen(), stats: stats() });
 });
 
-app.post('/api/tenders/archive-old', (_req, res) => {
+app.post('/api/tenders/archive-old', auth.requireAdmin, (_req, res) => {
   res.json({ archived: store.archiveSeenAndClosed(), stats: stats() });
 });
 
 // ---- watchlist: предприятия -------------------------------------------------
-app.post('/api/companies', (req, res) => {
+app.post('/api/companies', auth.requireAdmin, (req, res) => {
   const inn = normalizeInn(req.body?.inn);
   if (!isValidInn(inn)) return res.status(400).json({ error: 'Некорректный ИНН: нужно 10 или 12 цифр с верной контрольной суммой' });
   const role = ['any', 'customer', 'supplier'].includes(req.body?.role) ? req.body.role : 'any';
@@ -391,7 +405,7 @@ app.post('/api/companies', (req, res) => {
   res.status(created ? 201 : 200).json(company);
 });
 
-app.post('/api/companies/batch', (req, res) => {
+app.post('/api/companies/batch', auth.requireAdmin, (req, res) => {
   const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
   if (!rawItems.length) return res.status(400).json({ error: 'Передайте массив items' });
   const overwrite = Boolean(req.body?.overwrite);
@@ -413,7 +427,7 @@ app.post('/api/companies/batch', (req, res) => {
   res.json(result);
 });
 
-app.patch('/api/companies/:id', (req, res) => {
+app.patch('/api/companies/:id', auth.requireAdmin, (req, res) => {
   const patch = {};
   if (typeof req.body?.name === 'string' && req.body.name.trim()) patch.name = req.body.name.trim();
   if (['any', 'customer', 'supplier'].includes(req.body?.role)) patch.role = req.body.role;
@@ -423,12 +437,12 @@ app.patch('/api/companies/:id', (req, res) => {
   res.json(company);
 });
 
-app.delete('/api/companies/:id', (req, res) => {
+app.delete('/api/companies/:id', auth.requireAdmin, (req, res) => {
   res.json({ removed: store.removeCompany(req.params.id) });
 });
 
 // ---- watchlist: номенклатура ------------------------------------------------
-app.post('/api/nomenclature', (req, res) => {
+app.post('/api/nomenclature', auth.requireAdmin, (req, res) => {
   const context = req.body?.context ?? '';
   const keyword = String(req.body?.keyword ?? '').trim();
   const okpd2 = String(req.body?.okpd2 ?? '').trim();
@@ -439,17 +453,17 @@ app.post('/api/nomenclature', (req, res) => {
   res.status(created ? 201 : 200).json(item);
 });
 
-app.patch('/api/nomenclature/:id', (req, res) => {
+app.patch('/api/nomenclature/:id', auth.requireAdmin, (req, res) => {
   const item = store.updateNomenclature(req.params.id, { context: req.body?.context });
   if (!item) return res.status(404).json({ error: 'Позиция не найдена' });
   res.json(item);
 });
 
-app.delete('/api/nomenclature/:id', (req, res) => {
+app.delete('/api/nomenclature/:id', auth.requireAdmin, (req, res) => {
   res.json({ removed: store.removeNomenclature(req.params.id) });
 });
 
-app.post('/api/nomenclature/import', (req, res) => {
+app.post('/api/nomenclature/import', auth.requireAdmin, (req, res) => {
   const filename = String(req.body?.filename ?? 'nomenclature.csv');
   const data = req.body?.data;
   if (typeof data !== 'string' || !data.trim()) return res.status(400).json({ error: 'Файл не передан' });
@@ -478,11 +492,11 @@ app.post('/api/nomenclature/import', (req, res) => {
 });
 
 // ---- watchlist: импорт/экспорт ----------------------------------------------
-app.get('/api/watchlist/export', (_req, res) => {
+app.get('/api/watchlist/export', auth.requireAdmin, (_req, res) => {
   res.json(store.exportWatchlist());
 });
 
-app.post('/api/watchlist/import', (req, res) => {
+app.post('/api/watchlist/import', auth.requireAdmin, (req, res) => {
   const payload = req.body || {};
   const replace = Boolean(req.body?.replace);
   const rawCompanies = Array.isArray(payload.companies) ? payload.companies : [];
@@ -513,20 +527,20 @@ app.post('/api/watchlist/import', (req, res) => {
 });
 
 // ---- настройки, опрос, история -----------------------------------------------
-app.patch('/api/settings', (req, res) => {
+app.patch('/api/settings', auth.requireAdmin, (req, res) => {
   const before = store.settings.pollIntervalMin;
   const settings = store.updateSettings(req.body ?? {});
   if (settings.pollIntervalMin !== before) scheduler.schedule();
   res.json(settings);
 });
 
-app.post('/api/telegram/test', async (_req, res) => {
+app.post('/api/telegram/test', auth.requireAdmin, async (_req, res) => {
   const result = await notifier.testConnection();
   if (result.ok) res.json({ ok: true, message: 'Тестовое сообщение успешно отправлено в Telegram' });
   else res.status(400).json({ ok: false, error: result.error || 'Не удалось отправить сообщение' });
 });
 
-app.post('/api/scan', async (_req, res) => {
+app.post('/api/scan', auth.requireAdmin, async (_req, res) => {
   if (scheduler.running) return res.status(409).json({ error: 'Опрос уже выполняется' });
   const run = await scheduler.runOnce({ trigger: 'manual' });
   res.json({ run, stats: stats() });

@@ -38,9 +38,15 @@
       body: opts.body != null ? JSON.stringify(opts.body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      location.assign('/login');
+      throw new Error('Нужно войти');
+    }
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     return data;
   }
+
+  const isAdmin = () => state.user?.role === 'admin';
 
   function daysLeft(iso) {
     if (!iso) return null;
@@ -62,11 +68,27 @@
   // ---------- state ----------
   async function loadState() {
     const s = await api('/api/state');
-    Object.assign(state, { mode: s.mode, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun, facets: s.facets || {} });
+    Object.assign(state, { mode: s.mode, user: s.user, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun, facets: s.facets || {} });
     renderStatus();
     renderWatchlist();
     renderSettings();
+    applyRole();
     fillFilterSelects();
+    if (isAdmin()) loadUsers().catch((e) => toast(e.message, 'err'));
+  }
+
+  function applyRole() {
+    const admin = isAdmin();
+    document.body.classList.toggle('is-admin', admin);
+    $('#acc-name').textContent = state.user?.name || state.user?.login || '—';
+    $('#acc-role').textContent = admin ? 'администратор' : 'сотрудник';
+    for (const id of ['#set-interval', '#set-onlyopen', '#set-price-min', '#set-price-max', '#set-minus', '#set-fz44', '#set-fz223', '#set-fz615', '#set-telegram']) {
+      const el = $(id);
+      if (el) el.disabled = !admin;
+    }
+    $$('#set-platforms input').forEach((el) => {
+      el.disabled = !admin;
+    });
   }
 
   function renderStatus() {
@@ -195,7 +217,7 @@
           <div class="tender-actions">
             <button class="btn btn-sm fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="${t.favorite ? 'Убрать из избранного' : 'Отложить для дальнейшего рассмотрения'}">${t.favorite ? '★ В избранном' : '☆ В избранное'}</button>
             <button class="btn btn-sm btn-icon" data-act="seen" title="${t.seen ? 'Отметить как новое' : 'Прочитано'}">${t.seen ? '↺' : '✓'}</button>
-            <button class="btn btn-sm btn-icon" data-act="archive" title="${t.archived ? 'Вернуть из архива' : 'В архив'}">${t.archived ? '📤' : '🗄️'}</button>
+            ${isAdmin() ? `<button class="btn btn-sm btn-icon" data-act="archive" title="${t.archived ? 'Вернуть из архива' : 'В архив'}">${t.archived ? '📤' : '🗄️'}</button>` : ''}
           </div>
         </div>
       </article>`;
@@ -447,9 +469,9 @@
             <div class="item-title">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</div>
             <div class="item-sub">${n.okpd2 ? `ОКПД2 <code>${esc(n.okpd2)}</code>` : 'полнотекстовый поиск'}${n.context?.length ? ` · в названии одно из: ${esc(n.context.join(', '))}` : ''}</div>
           </div>
-          <button class="btn btn-sm" data-act="context" title="Уточняющие слова">✏️</button>
+          ${isAdmin() ? '<button class="btn btn-sm" data-act="context" title="Уточняющие слова">✏️</button>' : ''}
           <button class="btn btn-sm" data-act="feed" title="Показать в ленте">📡</button>
-          <button class="btn btn-sm btn-danger" data-act="del" title="Удалить">✕</button>
+          ${isAdmin() ? '<button class="btn btn-sm btn-danger" data-act="del" title="Удалить">✕</button>' : ''}
         </div>`,
         )
         .join('') || '<div class="muted small">Добавьте ключевые слова или ОКПД2.</div>';
@@ -611,6 +633,7 @@
     $('#set-telegram').disabled = !state.status?.telegram;
     $('#tg-hint').textContent = state.status?.telegram ? '' : '(токен не задан)';
     $('#set-browser').checked = state.browserNotify;
+    applyRole();
   }
 
   $('#btn-save-settings').addEventListener('click', async () => {
@@ -649,6 +672,91 @@
       toast(`Ошибка Telegram: ${err.message}`, 'err');
     } finally {
       $('#btn-test-tg').disabled = false;
+    }
+  });
+
+  $('#btn-logout').addEventListener('click', async () => {
+    try {
+      await api('/api/logout', { method: 'POST' });
+    } catch {
+      /* страница входа всё равно очистит доступ */
+    }
+    location.assign('/login');
+  });
+
+  $('#form-password').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/api/me/password', { method: 'POST', body: { current: fd.get('current'), next: fd.get('next') } });
+      e.target.reset();
+      toast('Пароль изменён', 'ok');
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  async function loadUsers() {
+    state.users = await api('/api/users');
+    const me = state.user?.id;
+    $('#users-list').innerHTML = state.users.length
+      ? state.users
+          .map(
+            (u) => `<div class="item" data-id="${esc(u.id)}">
+          <div class="item-main">
+            <div class="item-title">${esc(u.name)} <span class="role">${u.role === 'admin' ? 'администратор' : 'сотрудник'}</span>${u.disabled ? ' <span class="role">отключён</span>' : ''}</div>
+            <div class="item-sub">${esc(u.login)}${u.id === me ? ' · это вы' : ''}</div>
+          </div>
+          ${
+            u.id === me
+              ? ''
+              : `<button class="btn btn-sm" data-act="role">${u.role === 'admin' ? 'Сделать сотрудником' : 'Сделать администратором'}</button>
+          <button class="btn btn-sm" data-act="disable">${u.disabled ? 'Включить' : 'Отключить'}</button>
+          <button class="btn btn-sm" data-act="reset">Пароль</button>
+          <button class="btn btn-sm btn-danger" data-act="del">✕</button>`
+          }
+        </div>`,
+          )
+          .join('')
+      : '<div class="muted small">Пользователей нет</div>';
+  }
+
+  $('#form-user').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/api/users', { method: 'POST', body: Object.fromEntries(fd) });
+      e.target.reset();
+      toast('Пользователь добавлен', 'ok');
+      await loadUsers();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#users-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = btn.closest('.item')?.dataset.id;
+    const user = (state.users || []).find((u) => u.id === id);
+    if (!user) return;
+    try {
+      if (btn.dataset.act === 'del') {
+        if (!confirm(`Удалить учётную запись ${user.login}?`)) return;
+        await api(`/api/users/${id}`, { method: 'DELETE' });
+      } else if (btn.dataset.act === 'role') {
+        await api(`/api/users/${id}`, { method: 'PATCH', body: { role: user.role === 'admin' ? 'employee' : 'admin' } });
+      } else if (btn.dataset.act === 'disable') {
+        await api(`/api/users/${id}`, { method: 'PATCH', body: { disabled: !user.disabled } });
+      } else if (btn.dataset.act === 'reset') {
+        const password = prompt(`Новый пароль для ${user.login} (от 8 символов)`);
+        if (!password) return;
+        await api(`/api/users/${id}`, { method: 'PATCH', body: { password } });
+        toast('Пароль обновлён, старые входы закрыты', 'ok');
+      }
+      await loadUsers();
+    } catch (err) {
+      toast(err.message, 'err');
     }
   });
 
@@ -817,7 +925,10 @@
     });
     es.onerror = () => {
       es.close();
-      setTimeout(connectEvents, 5000);
+      fetch('/api/me').then((r) => {
+        if (r.status === 401) location.assign('/login');
+        else setTimeout(connectEvents, 5000);
+      });
     };
   }
 

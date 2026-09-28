@@ -45,7 +45,11 @@ export const config = {
   },
   /** Сколько дней хранить тендеры, которые больше не попадают в выборку */
   retentionDays: envInt('TENDER_SPY_RETENTION_DAYS', 90),
-  /** Пароль на весь сайт (HTTP Basic). Пусто — сайт открыт всем, у кого есть ссылка. */
-  password: process.env.TENDER_SPY_PASSWORD || '',
-  user: process.env.TENDER_SPY_USER || '',
+  /**
+   * Первый администратор, если в базе ещё нет пользователей.
+   * TENDER_SPY_PASSWORD / TENDER_SPY_USER — прежние имена тех же переменных.
+   * Пустой пароль — на сайте форма «создайте администратора».
+   */
+  adminLogin: process.env.TENDER_SPY_ADMIN_LOGIN || process.env.TENDER_SPY_USER || 'admin',
+  adminPassword: process.env.TENDER_SPY_ADMIN_PASSWORD || process.env.TENDER_SPY_PASSWORD || '',
 };

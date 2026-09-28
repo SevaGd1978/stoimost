@@ -5,6 +5,16 @@ import { findEisTwin, findPlatformTwins, parsePriceBound, staleNotice } from './
 import { PLATFORM_IDS } from './sources/platforms/index.js';
 import { DEFAULT_MINUS_WORDS, parseWordList } from './filters.js';
 import { regionFromText } from './regions.js';
+import {
+  AccountError,
+  ROLES,
+  assertKeepsAdmin,
+  hashPassword,
+  newSession,
+  validateLogin,
+  validateName,
+  validatePassword,
+} from './accounts.js';
 
 const DB_VERSION = 1;
 const REMOVED_SALE_SOURCES = new Set(['torgi', 'rad']);
@@ -37,6 +47,8 @@ function emptyDb() {
     tenders: {},
     runs: [],
     settings: defaultSettings(),
+    users: [],
+    sessions: [],
   };
 }
 
@@ -75,6 +87,11 @@ export class Store {
         companies: parsed.watchlist?.companies ?? [],
         nomenclature: parsed.watchlist?.nomenclature ?? [],
       };
+      this.db.users = Array.isArray(parsed.users) ? parsed.users : [];
+      this.db.sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+      const sessionsBefore = this.db.sessions.length;
+      this.purgeSessions();
+      if (this.db.sessions.length !== sessionsBefore) this.scheduleSave();
     } catch (err) {
       if (err.code !== 'ENOENT') {
         console.warn(`[store] не удалось прочитать ${this.file}: ${err.message}. Стартуем с пустой базой.`);
@@ -545,5 +562,99 @@ export class Store {
     }
     this.scheduleSave();
     return s;
+  }
+
+  // ---- users & sessions ------------------------------------------------
+
+  get users() {
+    return this.db.users;
+  }
+
+  findUserByLogin(login) {
+    const key = String(login || '').trim().toLowerCase();
+    return this.users.find((u) => u.login === key) || null;
+  }
+
+  userById(id) {
+    return this.users.find((u) => u.id === id) || null;
+  }
+
+  createUser({ login, name, password, role = 'employee' }) {
+    const loginNorm = validateLogin(login);
+    if (this.users.some((u) => u.login === loginNorm)) throw new AccountError('Такой логин уже есть');
+    if (!ROLES.includes(role)) throw new AccountError('Роль: администратор или сотрудник');
+    if (!this.users.length && role !== 'admin') throw new AccountError('Первый пользователь должен быть администратором');
+    const { salt, hash } = hashPassword(validatePassword(password));
+    const user = {
+      id: newId('u_'),
+      login: loginNorm,
+      name: validateName(name, loginNorm),
+      role,
+      disabled: false,
+      salt,
+      hash,
+      createdAt: new Date().toISOString(),
+    };
+    this.users.push(user);
+    this.save();
+    return user;
+  }
+
+  updateUser(id, patch = {}) {
+    const user = this.userById(id);
+    if (!user) return null;
+    const next = {};
+    if (patch.name != null) next.name = validateName(patch.name, user.login);
+    if (patch.role != null) {
+      if (!ROLES.includes(patch.role)) throw new AccountError('Роль: администратор или сотрудник');
+      next.role = patch.role;
+    }
+    if (patch.disabled != null) next.disabled = Boolean(patch.disabled);
+    if (patch.password) Object.assign(next, hashPassword(validatePassword(patch.password)));
+    if ('role' in next || 'disabled' in next) assertKeepsAdmin(this.users, { id, patch: next });
+    Object.assign(user, next);
+    if (next.disabled || patch.password) this.dropSessions(user.id);
+    this.save();
+    return user;
+  }
+
+  removeUser(id) {
+    if (!this.userById(id)) return false;
+    assertKeepsAdmin(this.users, { id, removing: true });
+    this.db.users = this.users.filter((u) => u.id !== id);
+    this.dropSessions(id);
+    this.save();
+    return true;
+  }
+
+  purgeSessions(now = Date.now()) {
+    this.db.sessions = (this.db.sessions || []).filter((s) => Date.parse(s.expiresAt) > now);
+  }
+
+  dropSessions(userId) {
+    this.db.sessions = this.db.sessions.filter((s) => s.userId !== userId);
+  }
+
+  openSession(userId) {
+    this.purgeSessions();
+    const session = newSession(userId);
+    this.db.sessions.push(session);
+    this.save();
+    return session;
+  }
+
+  closeSession(token) {
+    const before = this.db.sessions.length;
+    this.db.sessions = this.db.sessions.filter((s) => s.id !== token);
+    if (this.db.sessions.length !== before) this.save();
+  }
+
+  sessionUser(token) {
+    if (!token) return null;
+    const session = this.db.sessions.find((s) => s.id === token);
+    if (!session || Date.parse(session.expiresAt) <= Date.now()) return null;
+    const user = this.userById(session.userId);
+    if (!user || user.disabled) return null;
+    return user;
   }
 }

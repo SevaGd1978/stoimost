@@ -1,29 +1,56 @@
-import crypto from 'node:crypto';
+import { COOKIE, hashPassword, loginLimiter, parseCookies, publicUser, verifyPassword, AccountError, normalizeLogin } from './accounts.js';
 
-function safeEqual(a, b) {
-  const x = crypto.createHash('sha256').update(String(a)).digest();
-  const y = crypto.createHash('sha256').update(String(b)).digest();
-  return crypto.timingSafeEqual(x, y);
+const OPEN = new Set(['/health', '/login', '/login.html', '/styles.css', '/api/login', '/api/setup', '/api/logout']);
+
+const DUMMY = hashPassword('tender-spy-dummy-password');
+
+export function authenticate(store, limiter, loginRaw, password) {
+  const login = normalizeLogin(loginRaw);
+  if (!login) throw new AccountError('Неверный логин или пароль', 401);
+  limiter.check(login);
+  const user = store.findUserByLogin(login);
+  const okPassword = verifyPassword(password ?? '', user || DUMMY);
+  if (!user || !okPassword) {
+    limiter.fail(login);
+    throw new AccountError('Неверный логин или пароль', 401);
+  }
+  if (user.disabled) {
+    limiter.fail(login);
+    throw new AccountError('Учётная запись отключена', 403);
+  }
+  limiter.ok(login);
+  return user;
+}
+
+export function cookieSecure(req) {
+  return Boolean(req.secure || req.get?.('x-forwarded-proto') === 'https');
 }
 
 /**
- * HTTP Basic-авторизация на весь сайт, если задан пароль (TENDER_SPY_PASSWORD).
- * Имя пользователя — любое, если не задано TENDER_SPY_USER. Без пароля — пропускает всех.
+ * Сессия в cookie. Без входа API отвечает 401, страницы переадресуются на /login.
+ * /health и страница входа открыты.
  */
-export function basicAuth({ password, user = '', realm = 'Tender Spy', open = [] } = {}) {
-  if (!password) return (_req, _res, next) => next();
-  return (req, res, next) => {
-    if (open.includes(req.path)) return next();
-    const header = req.get('authorization') || '';
-    const [scheme, encoded] = header.split(' ');
-    if (scheme?.toLowerCase() === 'basic' && encoded) {
-      const decoded = Buffer.from(encoded, 'base64').toString('utf8');
-      const sep = decoded.indexOf(':');
-      const u = sep >= 0 ? decoded.slice(0, sep) : decoded;
-      const p = sep >= 0 ? decoded.slice(sep + 1) : '';
-      if (safeEqual(p, password) && (!user || safeEqual(u, user))) return next();
+export function createAuth({ store, limiter = loginLimiter() } = {}) {
+  function attach(req, res, next) {
+    const token = parseCookies(req.headers.cookie)[COOKIE];
+    const user = token ? store.sessionUser(token) : null;
+    if (user) req.user = publicUser(user);
+    if (OPEN.has(req.path)) return next();
+    if (!req.user) {
+      if (req.path.startsWith('/api/')) return res.status(401).json({ error: 'Нужно войти' });
+      const accept = String(req.get?.('accept') || '');
+      if (req.method === 'GET' && (accept.includes('text/html') || req.path === '/' || req.path === '/index.html')) {
+        return res.redirect('/login');
+      }
+      return res.status(401).send('Нужно войти');
     }
-    res.set('WWW-Authenticate', `Basic realm="${realm}", charset="UTF-8"`);
-    res.status(401).send('Нужен пароль Tender Spy');
-  };
+    next();
+  }
+
+  function requireAdmin(req, res, next) {
+    if (req.user?.role === 'admin') return next();
+    return res.status(403).json({ error: 'Недостаточно прав: это может только администратор' });
+  }
+
+  return { attach, requireAdmin, limiter, store };
 }
