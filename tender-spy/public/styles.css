@@ -238,6 +238,12 @@ select.input { appearance: none; }
 .nav-badge.fav-badge { background: var(--gold); color: #2a1f00; }
 .nav-badge.crm-badge { background: var(--accent-2); color: #042033; }
 .crm-modal { max-width: 720px; }
+.volume-modal { max-width: 760px; }
+.volume-total { margin: 4px 0 10px; font-size: 20px; font-weight: 800; }
+.volume-chart { width: 100%; height: auto; background: var(--bg-2); border-radius: 10px; display: block; }
+.volume-note, .volume-sources { font-size: 12.5px; color: var(--muted); }
+.volume-sources { margin: 8px 0 0; padding-left: 18px; }
+.volume-modal .table { margin-top: 12px; }
 .crm-log { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
 .crm-log div { font-size: 12.5px; color: var(--muted); }
 .crm-log b { color: var(--text); font-weight: 600; }

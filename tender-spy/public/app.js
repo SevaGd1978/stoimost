@@ -205,8 +205,8 @@
             inFavorites
               ? `<div class="tender-note"><textarea class="input note-input" rows="2" maxlength="2000" placeholder="Заметка: что уточнить, решение, контакты заказчика…">${esc(t.comment || '')}</textarea><span class="note-status"></span></div>
                  <div class="tender-docs" data-docs>${renderDocs(t)}</div>
-                 ${legalCheckLink(t)}`
-              : `${t.comment ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>` : ''}${t.favorite ? legalCheckLink(t) : ''}`
+                 ${customerTools(t)}`
+              : `${t.comment ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>` : ''}${t.favorite ? customerTools(t) : ''}`
           }
           ${
             !inFavorites && t.documents?.state === 'done'
@@ -233,7 +233,17 @@
     const title = byInn
       ? 'Карточка заказчика на Saby: надёжность, выручка, долги, суды и исполнительные производства'
       : 'Поиск заказчика на Чекко: ИНН в карточке ещё нет';
-    return `<div class="tender-docs"><a class="btn btn-sm" href="${esc(t.legalCheckUrl)}" target="_blank" rel="noopener" title="${esc(title)}">⚖ Юридическая проверка</a></div>`;
+    return `<a class="btn btn-sm" href="${esc(t.legalCheckUrl)}" target="_blank" rel="noopener" title="${esc(title)}">⚖ Юридическая проверка</a>`;
+  }
+
+  function volumeButton(t) {
+    if (!t.customer && !t.customerInn) return '';
+    return `<button type="button" class="btn btn-sm" data-act="volume" title="Бесплатный реестр контрактов ЕИС и закупки этого заказчика, уже найденные Tender Spy">📊 Объём закупок</button>`;
+  }
+
+  function customerTools(t) {
+    const html = `${legalCheckLink(t)}${volumeButton(t)}`;
+    return html.trim() ? `<div class="tender-docs">${html}</div>` : '';
   }
 
   function docsUrl(t, suffix = '') {
@@ -305,6 +315,7 @@
       if (btn.dataset.act === 'docs') return extractDocs(t);
       if (btn.dataset.act === 'docs-list') return toggleDocsList(t, btn);
       if (btn.dataset.act === 'crm') return openInCrm(t);
+      if (btn.dataset.act === 'volume') return openVolume(t);
       const patch =
         btn.dataset.act === 'favorite' ? { favorite: !t.favorite } : btn.dataset.act === 'seen' ? { seen: !t.seen } : { archived: !t.archived, seen: true };
       try {
@@ -334,6 +345,87 @@
       toast(err.message, 'err');
     }
   }
+
+  function fmtCompact(n) {
+    const v = Number(n) || 0;
+    if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млрд`;
+    if (v >= 1_000_000) return `${(v / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн`;
+    if (v >= 1_000) return `${Math.round(v / 1_000).toLocaleString('ru-RU')} тыс.`;
+    return fmtPrice(v);
+  }
+
+  function renderVolumeChart(series) {
+    if (!series.length) return '';
+    const max = Math.max(...series.map((s) => s.sum), 1);
+    const w = 640;
+    const h = 220;
+    const padT = 26;
+    const padB = 28;
+    const gap = 8;
+    const plotH = h - padT - padB;
+    const barW = Math.max(16, Math.min(56, (w - 24 - gap * series.length) / series.length));
+    const totalW = series.length * barW + (series.length - 1) * gap;
+    const x0 = (w - totalW) / 2;
+    const showSum = series.length <= 8;
+    const bars = series
+      .map((s, i) => {
+        const bh = s.sum > 0 ? Math.max(4, (s.sum / max) * plotH) : 2;
+        const x = x0 + i * (barW + gap);
+        const y = padT + (plotH - bh);
+        const sum = showSum ? `<text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" fill="#e6ecff" font-size="11">${esc(fmtCompact(s.sum))}</text>` : '';
+        return `<g><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="4" fill="${s.sum ? '#5ee1a8' : '#24325c'}"></rect>${sum}<text x="${(x + barW / 2).toFixed(1)}" y="${h - 8}" text-anchor="middle" fill="#8b97bf" font-size="12">${s.year}</text></g>`;
+      })
+      .join('');
+    return `<svg class="volume-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Объём закупок по годам">${bars}</svg>`;
+  }
+
+  function renderVolume(report) {
+    const rows = (report.series || [])
+      .map((s) => `<tr><td>${s.year}</td><td>${s.count}</td><td>${fmtPrice(s.sum)}</td></tr>`)
+      .join('');
+    const items = (report.items || [])
+      .map((item) => `<tr><td>${fmtDate(item.publishedAt)}</td><td>${esc(item.title)}</td><td>${fmtPrice(item.price)}</td></tr>`)
+      .join('');
+    const sources = (report.sources || [])
+      .map((s) => `<li><b>${esc(s.label)}</b>: ${s.count}${s.note ? ` — ${esc(s.note)}` : ''}</li>`)
+      .join('');
+    return `
+      ${report.warning ? `<p class="docs-error">${esc(report.warning)}</p>` : ''}
+      <div class="volume-total">${esc(report.basisLabel || '')}${report.total ? `: ${fmtPrice(report.total.sum)} ₽` : ''}</div>
+      ${renderVolumeChart(report.series || [])}
+      ${rows ? `<table class="table"><thead><tr><th>Год</th><th>Закупок</th><th>Сумма, ₽</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+      ${items ? `<table class="table"><thead><tr><th>Дата</th><th>Закупка</th><th>Сумма, ₽</th></tr></thead><tbody>${items}</tbody></table>` : ''}
+      ${sources ? `<ul class="volume-sources">${sources}</ul>` : ''}
+      ${report.note ? `<p class="volume-note">${esc(report.note)}</p>` : ''}`;
+  }
+
+  async function openVolume(t) {
+    $('#volume-title').textContent = 'Объём закупок';
+    $('#volume-sub').textContent = t.customer || 'Заказчик';
+    $('#volume-registry').hidden = true;
+    $('#volume-body').innerHTML = '<p class="volume-note"><span class="spinner"></span> Ищем контракты заказчика в бесплатном реестре ЕИС…</p>';
+    $('#modal-volume').hidden = false;
+    const params = new URLSearchParams();
+    if (t.customerInn) params.set('inn', t.customerInn);
+    if (t.customer) params.set('name', t.customer);
+    try {
+      const report = await api(`/api/customers/procurement?${params}`);
+      $('#volume-title').textContent = report.customer?.name || t.customer || 'Объём закупок';
+      const bits = [report.customer?.inn ? `ИНН ${report.customer.inn}` : '', report.total?.count ? `${report.total.count} зап.` : ''].filter(Boolean);
+      $('#volume-sub').textContent = bits.join(' · ');
+      $('#volume-body').innerHTML = renderVolume(report);
+      if (report.registryUrl) {
+        $('#volume-registry').href = report.registryUrl;
+        $('#volume-registry').hidden = false;
+      }
+    } catch (err) {
+      $('#volume-body').innerHTML = `<p class="docs-error">${esc(err.message)}</p>`;
+    }
+  }
+
+  $('#volume-close').addEventListener('click', () => {
+    $('#modal-volume').hidden = true;
+  });
 
   async function toggleDocsList(t, btn) {
     const box = btn.parentElement.querySelector('.docs-list');

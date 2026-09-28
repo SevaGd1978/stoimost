@@ -19,6 +19,7 @@ import { mountAuthRoutes } from './src/auth-routes.js';
 import { ensureBootstrapAdmin, publicUser, tenderPatchFor } from './src/accounts.js';
 import { CRM_STAGES, CrmError, isOpenStage, presentDeal } from './src/crm.js';
 import { legalCheckUrl } from './src/legal-check.js';
+import { collectCustomerVolume } from './src/procurement.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 import {
@@ -77,6 +78,17 @@ const source =
           log,
         }),
       ]);
+
+const volumeSource =
+  config.mode === 'demo'
+    ? null
+    : new ZakupkiSource({
+        base: config.zakupkiBase,
+        userAgent: config.userAgent,
+        timeoutMs: config.requestTimeoutMs,
+        dispatcher: proxyDispatcher,
+        log,
+      });
 
 const notifier = new TelegramNotifier({ token: config.telegram.token, chatId: config.telegram.chatId, log });
 const scheduler = new Scheduler({ store, source, notifier, retentionDays: config.retentionDays, log });
@@ -328,6 +340,22 @@ app.get('/api/tenders', (req, res) => {
   const list = filterTenders(req.query);
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
   res.json({ total: list.length, items: list.slice(0, limit).map(withCrm) });
+});
+
+app.get('/api/customers/procurement', async (req, res) => {
+  try {
+    const report = await collectCustomerVolume({
+      inn: req.query.inn,
+      name: req.query.name,
+      tenders: Object.values(store.tenders),
+      fetchXml: volumeSource ? (url) => volumeSource.fetchXml(url) : null,
+      base: config.zakupkiBase,
+      mode: config.mode === 'demo' ? 'demo' : 'live',
+    });
+    res.json(report);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Не удалось собрать объём закупок' });
+  }
 });
 
 app.get('/api/tenders.csv', (req, res) => {
