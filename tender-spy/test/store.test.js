@@ -223,3 +223,56 @@ test('Store: очистка ленты — просмотренные и зак�
   assert.equal(archived('notice:1'), true);
   assert.equal(store.archiveSeenAndClosed(), 0);
 });
+
+test('Store: закупка B2B-Center и её копия в ЕИС («… (4613943)») — одна карточка', () => {
+  const file = tmpFile();
+  const store = new Store(file);
+  const b2b = sample('b2bcenter:4613943', {
+    source: 'b2bcenter',
+    law: 'other',
+    number: '4613943',
+    title: 'Поставка фасонных изделий в ППУ изоляции',
+    url: 'https://www.b2b-center.ru/market/x/tender-4613943/',
+    links: { b2bcenter: 'https://www.b2b-center.ru/market/x/tender-4613943/' },
+  });
+  const eis = sample('notice:32616404967', {
+    source: 'zakupki',
+    law: '223',
+    number: '32616404967',
+    title: 'Поставка фасонных изделий в ППУ изоляции для нужд филиала «Владимирский» ПАО «Т Плюс» (4613943)',
+    url: 'https://zakupki.gov.ru/223/purchase/public/purchase/info/common-info.html?regNumber=32616404967',
+  });
+
+  // Сначала площадка (прошлые опросы), пользователь отметил её избранной.
+  assert.equal(store.upsertTender(b2b), true);
+  store.patchTender(b2b.id, { favorite: true, seen: true, comment: 'Запросить КП' });
+  // Затем ЕИС: карточка площадки вливается в неё, «новой» не считается.
+  assert.equal(store.upsertTender(eis), false);
+  assert.equal(store.tenders[b2b.id], undefined);
+  const t = store.tenders[eis.id];
+  assert.deepEqual(Object.keys(t.links).sort(), ['b2bcenter', 'zakupki']);
+  assert.equal(t.platformNumber, '4613943');
+  assert.equal(t.favorite, true);
+  assert.equal(t.comment, 'Запросить КП');
+  assert.equal(t.seen, true);
+
+  // Следующий опрос площадки не создаёт копию заново.
+  assert.equal(store.upsertTender(b2b), false);
+  assert.equal(Object.keys(store.tenders).length, 1);
+
+  // Номер площадки внутри другого числа — не двойник.
+  store.upsertTender(sample('b2bcenter:461394', { source: 'b2bcenter', number: '461394', links: { b2bcenter: 'https://b2b/x' } }));
+  assert.ok(store.tenders['b2bcenter:461394']);
+});
+
+test('Store: двойники в уже сохранённой базе склеиваются при запуске', () => {
+  const file = tmpFile();
+  const store = new Store(file);
+  store.upsertTender(sample('notice:32616402520', { source: 'zakupki', title: 'Фасонные изделия и элементы в ППУ изоляции (4612897)' }));
+  store.tenders['b2bcenter:4612897'] = sample('b2bcenter:4612897', { source: 'b2bcenter', number: '4612897', favorite: true, links: { b2bcenter: 'https://b2b/4612897' } });
+  store.save();
+  const reloaded = new Store(file);
+  assert.deepEqual(Object.keys(reloaded.tenders), ['notice:32616402520']);
+  assert.equal(reloaded.tenders['notice:32616402520'].favorite, true);
+  assert.equal(reloaded.tenders['notice:32616402520'].links.b2bcenter, 'https://b2b/4612897');
+});

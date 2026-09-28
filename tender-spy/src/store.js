@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { parsePriceBound, staleNotice } from './tenders.js';
+import { findEisTwin, findPlatformTwins, parsePriceBound, staleNotice } from './tenders.js';
 import { PLATFORM_IDS } from './sources/platforms/index.js';
 import { DEFAULT_MINUS_WORDS, parseWordList } from './filters.js';
 import { regionFromText } from './regions.js';
@@ -65,6 +65,7 @@ export class Store {
       const saved = parsed.settings?.platforms || {};
       this.db.settings.platforms = Object.fromEntries(PLATFORM_IDS.map((id) => [id, saved[id] !== false]));
       this.dropPropertySales();
+      this.mergeTwins();
       this.closeStaleNotices();
       for (const t of Object.values(this.db.tenders)) {
         const fromTitle = (t.cardAt || !t.region) && regionFromText(t.title);
@@ -294,6 +295,13 @@ export class Store {
    */
   upsertTender(tender) {
     const now = new Date().toISOString();
+    const twin = this.tenders[tender.id] ? null : findEisTwin(tender, this.tenders);
+    if (twin) {
+      // Та же закупка уже есть из ЕИС: площадка только добавляет свою ссылку.
+      twin.platformNumber ||= String(tender.number);
+      this.upsertTender({ ...tender, id: twin.id });
+      return false;
+    }
     const existing = this.tenders[tender.id];
     if (!existing) {
       this.tenders[tender.id] = {
@@ -305,7 +313,8 @@ export class Store {
         favorite: false,
         archived: false,
       };
-      return true;
+      const absorbed = this.absorbPlatformTwins(this.tenders[tender.id]);
+      return absorbed === 0;
     }
     const matchKeys = new Set(existing.matches.map((m) => `${m.type}:${m.ref}`));
     for (const m of tender.matches) {
@@ -343,6 +352,40 @@ export class Store {
     });
     if (stageChanged) existing.seen = false;
     return false;
+  }
+
+  /**
+   * Переносит в карточку ЕИС копии той же закупки с площадок (номер площадки в скобках
+   * в названии): ссылки, избранное, заметку и отметки. Возвращает число склеенных копий.
+   */
+  absorbPlatformTwins(eis) {
+    const twins = findPlatformTwins(eis, this.tenders);
+    for (const p of twins) {
+      eis.links = { ...(p.links ?? { [p.source]: p.url }), ...(eis.links ?? { [eis.source || 'zakupki']: eis.url }) };
+      eis.platformNumber ||= String(p.number);
+      const keys = new Set((eis.matches ?? []).map((m) => `${m.type}:${m.ref}`));
+      eis.matches = [...(eis.matches ?? []), ...(p.matches ?? []).filter((m) => !keys.has(`${m.type}:${m.ref}`))];
+      if (p.favorite && !eis.favorite) Object.assign(eis, { favorite: true, favoritedAt: p.favoritedAt });
+      if (p.comment) eis.comment = eis.comment && eis.comment !== p.comment ? `${eis.comment}\n${p.comment}` : p.comment;
+      eis.seen = Boolean(eis.seen || p.seen);
+      eis.archived = Boolean(eis.archived || p.archived) && !eis.favorite;
+      if (p.firstSeenAt && (!eis.firstSeenAt || p.firstSeenAt < eis.firstSeenAt)) eis.firstSeenAt = p.firstSeenAt;
+      eis.customer ||= p.customer;
+      eis.price ??= p.price;
+      eis.deadlineAt ||= p.deadlineAt;
+      delete this.tenders[p.id];
+    }
+    return twins.length;
+  }
+
+  /** Склейка двойников площадка/ЕИС в уже сохранённой базе. */
+  mergeTwins() {
+    let n = 0;
+    for (const t of Object.values(this.db.tenders)) {
+      if (this.db.tenders[t.id] === t) n += this.absorbPlatformTwins(t);
+    }
+    if (n) this.scheduleSave();
+    return n;
   }
 
   patchTender(id, patch) {

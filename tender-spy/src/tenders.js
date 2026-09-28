@@ -107,3 +107,35 @@ export function keywordMatches(keyword, text) {
 export function innMentioned(inn, text) {
   return new RegExp(`(^|\\D)${inn}(\\D|$)`).test(String(text ?? ''));
 }
+
+const isEisTender = (t) => (t.source || 'zakupki') === 'zakupki' && t.kind !== 'contract';
+
+/** Номера, под которыми закупка известна на площадке (у закупки без номера ЕИС это её собственный номер). */
+function platformNumbers(t) {
+  return [t.platformNumber, t.number].filter((n) => n && /^\d{5,}$/.test(n));
+}
+
+/**
+ * Закупка площадки, опубликованная и в ЕИС: заказчики (например, «Т Плюс») пишут номер
+ * площадки в скобках в названии извещения ЕИС — «… (4613943)».
+ */
+export function findEisTwin(tender, tenders) {
+  if (isEisTender(tender)) return null;
+  const numbers = platformNumbers(tender);
+  if (!numbers.length) return null;
+  for (const t of Object.values(tenders)) {
+    if (t === tender || !isEisTender(t)) continue;
+    if (numbers.some((n) => String(t.title || '').includes(`(${n})`))) return t;
+  }
+  return null;
+}
+
+/** Обратный поиск: закупки площадок, чей номер стоит в скобках в названии извещения ЕИС. */
+export function findPlatformTwins(eisTender, tenders) {
+  if (!isEisTender(eisTender)) return [];
+  const title = String(eisTender.title || '');
+  if (!title.includes('(')) return [];
+  return Object.values(tenders).filter(
+    (t) => t !== eisTender && !isEisTender(t) && platformNumbers(t).some((n) => title.includes(`(${n})`)),
+  );
+}

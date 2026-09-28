@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { PDFDocument, PDFHexString, PDFName } from 'pdf-lib';
+import { findEisTwin } from '../tenders.js';
 import { classify, extOf, extractArchive, officeToPdf, tools } from './convert.js';
 import {
   documentsUrlFromCard,
@@ -40,17 +41,6 @@ function safeFileName(name, fallback) {
 export function eisCardUrl(tender) {
   if (tender.links?.zakupki && isEisUrl(tender.links.zakupki)) return tender.links.zakupki;
   if ((tender.source || 'zakupki') === 'zakupki' && isEisUrl(tender.url)) return tender.url;
-  return null;
-}
-
-/** Закупка площадки, опубликованная и в ЕИС: заказчики (например, «Т Плюс») пишут номер площадки в скобках в названии. */
-export function findEisTwin(tender, tenders) {
-  const numbers = [tender.platformNumber, tender.number].filter((n) => n && /^\d{5,}$/.test(n));
-  if (!numbers.length) return null;
-  for (const t of Object.values(tenders)) {
-    if (t === tender || !eisCardUrl(t) || t.kind === 'contract') continue;
-    if (numbers.some((n) => String(t.title || '').includes(`(${n})`))) return t;
-  }
   return null;
 }
 
@@ -469,4 +459,4 @@ export class DocumentService {
   }
 }
 
-export { UserError as DocumentsError };
+export { UserError as DocumentsError, findEisTwin };
