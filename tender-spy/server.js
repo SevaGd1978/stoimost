@@ -18,6 +18,7 @@ import { createAuth } from './src/auth.js';
 import { mountAuthRoutes } from './src/auth-routes.js';
 import { ensureBootstrapAdmin, publicUser, tenderPatchFor } from './src/accounts.js';
 import { CRM_STAGES, CrmError, isOpenStage, presentDeal } from './src/crm.js';
+import { legalCheckUrl } from './src/legal-check.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 import {
@@ -318,7 +319,9 @@ function filterTenders(query) {
 
 function withCrm(t) {
   const stage = store.deals[t.id]?.stage;
-  return stage ? { ...t, crmStage: stage } : t;
+  const check = legalCheckUrl(t);
+  if (!stage && !check) return t;
+  return { ...t, ...(stage ? { crmStage: stage } : {}), ...(check ? { legalCheckUrl: check } : {}) };
 }
 
 app.get('/api/tenders', (req, res) => {

@@ -204,10 +204,9 @@
           ${
             inFavorites
               ? `<div class="tender-note"><textarea class="input note-input" rows="2" maxlength="2000" placeholder="Заметка: что уточнить, решение, контакты заказчика…">${esc(t.comment || '')}</textarea><span class="note-status"></span></div>
-                 <div class="tender-docs" data-docs>${renderDocs(t)}</div>`
-              : t.comment
-                ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>`
-                : ''
+                 <div class="tender-docs" data-docs>${renderDocs(t)}</div>
+                 ${legalCheckLink(t)}`
+              : `${t.comment ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>` : ''}${t.favorite ? legalCheckLink(t) : ''}`
           }
           ${
             !inFavorites && t.documents?.state === 'done'
@@ -226,6 +225,15 @@
           </div>
         </div>
       </article>`;
+  }
+
+  function legalCheckLink(t) {
+    if (!t.legalCheckUrl) return '';
+    const byInn = t.legalCheckUrl.includes('/contragents/');
+    const title = byInn
+      ? 'Карточка заказчика на Saby: надёжность, выручка, долги, суды и исполнительные производства'
+      : 'Поиск заказчика на Чекко: ИНН в карточке ещё нет';
+    return `<div class="tender-docs"><a class="btn btn-sm" href="${esc(t.legalCheckUrl)}" target="_blank" rel="noopener" title="${esc(title)}">⚖ Юридическая проверка</a></div>`;
   }
 
   function docsUrl(t, suffix = '') {
