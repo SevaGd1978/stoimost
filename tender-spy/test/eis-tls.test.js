@@ -88,3 +88,12 @@ test('клиент повторяет запрос один раз, если с�
     server.close();
   }
 });
+
+test('certs/russian-trusted-ca-bundle.pem читается целиком (NODE_EXTRA_CA_CERTS в Dockerfile)', () => {
+  const text = fs.readFileSync(new URL('../certs/russian-trusted-ca-bundle.pem', import.meta.url), 'utf8');
+  assert.ok(!text.includes('\r'), 'без CRLF');
+  assert.ok(!/-----END CERTIFICATE-----[^\n]/.test(text), 'каждый сертификат с новой строки');
+  const certs = text.match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g);
+  assert.equal(certs.length, 4);
+  for (const pem of certs) assert.ok(new X509Certificate(pem).subject);
+});
