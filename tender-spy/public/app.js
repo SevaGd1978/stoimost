@@ -333,10 +333,38 @@
       : 'Закупки, отобранные для дальнейшего рассмотрения';
     // Не перерисовываем список, пока пользователь печатает заметку.
     if (document.activeElement?.classList.contains('note-input') && $('#fav-list').contains(document.activeElement)) return;
+    renderDeadlineBanner();
     $('#fav-list').innerHTML = state.favorites.map((t) => renderTender(t, { inFavorites: true })).join('');
     $('#fav-empty').hidden = state.favorites.length > 0;
     $('#fav-empty h3').textContent = filtered ? 'Ничего не найдено' : 'В избранном пока пусто';
   }
+
+  function renderDeadlineBanner() {
+    const soon = state.favorites
+      .filter((t) => t.kind === 'notice' && t.isOpen !== false && !t.archived)
+      .map((t) => ({ t, left: daysLeft(t.deadlineAt) }))
+      .filter(({ left }) => left != null && left >= 0 && left <= 3)
+      .sort((a, b) => Date.parse(a.t.deadlineAt) - Date.parse(b.t.deadlineAt));
+    const box = $('#fav-deadlines');
+    box.hidden = !soon.length;
+    box.innerHTML = soon.length
+      ? `<b>⏰ Скоро окончание подачи: ${soon.length}</b>` +
+        soon
+          .map(({ t, left }) => `<a href="#" data-jump="${esc(t.id)}">${esc(t.title.slice(0, 90))}${t.title.length > 90 ? '…' : ''}</a> <span class="muted">— до ${fmtDateTime(t.deadlineAt)}, ${left <= 1 ? 'меньше суток' : `${left} дн.`}</span>`)
+          .map((line) => `<div>${line}</div>`)
+          .join('')
+      : '';
+  }
+
+  $('#fav-deadlines').addEventListener('click', (e) => {
+    const a = e.target.closest('[data-jump]');
+    if (!a) return;
+    e.preventDefault();
+    const card = $(`#fav-list .tender[data-id="${CSS.escape(a.dataset.jump)}"]`);
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card?.classList.add('flash');
+    setTimeout(() => card?.classList.remove('flash'), 1500);
+  });
 
   $('#fav-list').addEventListener('change', async (e) => {
     const input = e.target.closest('.note-input');
@@ -759,6 +787,22 @@
       if (run.trigger === 'timer' && added.length) toast(`Автоопрос: ${added.length} новых закупок`, 'ok');
     });
     es.addEventListener('cards:done', () => refreshLists().catch(() => {}));
+    es.addEventListener('reminders', (e) => {
+      const due = JSON.parse(e.data);
+      toast(`⏰ Скоро окончание подачи по избранным: ${due.length}`, 'ok');
+      if (state.browserNotify && Notification.permission === 'granted') {
+        const first = due[0];
+        const n = new Notification(`Tender Spy: скоро окончание подачи (${due.length})`, {
+          body: `${first.title.slice(0, 120)} — осталось ${first.left <= 1 ? 'меньше суток' : `${first.left} дн.`}`,
+          icon: '/favicon.ico',
+        });
+        n.onclick = () => {
+          window.focus();
+          showView('favorites');
+        };
+      }
+      loadFavorites().catch(() => {});
+    });
     es.addEventListener('documents', (e) => {
       const d = JSON.parse(e.data);
       const t = findTender(d.tenderId);

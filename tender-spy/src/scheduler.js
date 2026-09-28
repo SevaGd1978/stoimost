@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { rejectReason } from './filters.js';
+import { dueReminders, formatReminderMessage, markReminded } from './reminders.js';
 
 /**
  * ЕИС уже отобрал выдачу по НМЦК. Здесь отсекаем только карточки, чья цена
@@ -135,9 +136,25 @@ export class Scheduler extends EventEmitter {
       this.notifier.notifyNewTenders(added).catch((err) => this.log.warn('[telegram]', err.message));
     }
 
+    this.checkReminders();
     this.schedule();
-    this.enrichCards().catch((err) => this.log.warn('[cards]', err.message));
+    this.enrichCards()
+      .then(() => this.checkReminders())
+      .catch((err) => this.log.warn('[cards]', err.message));
     return run;
+  }
+
+  /** Напоминания о скором окончании подачи по избранным: событие для браузера и Telegram. */
+  checkReminders(now = Date.now()) {
+    const due = dueReminders(this.store.tenders, now);
+    if (!due.length) return [];
+    for (const d of due) markReminded(d.tender, d.threshold, now);
+    this.store.scheduleSave();
+    this.emit('reminders', due);
+    if (this.store.settings.notifyTelegram && this.notifier?.enabled) {
+      this.notifier.send(formatReminderMessage(due)).catch((err) => this.log.warn('[telegram]', err.message));
+    }
+    return due;
   }
 
   /**

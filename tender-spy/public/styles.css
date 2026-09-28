@@ -250,3 +250,7 @@ select.input { appearance: none; }
 .docs-list .doc-error { color: #ffb3b3; }
 .docs-originals a { color: var(--accent-2); }
 .tender-note-view a { color: var(--accent-2); }
+.deadline-banner { background: rgba(255, 176, 32, 0.08); border: 1px solid rgba(255, 176, 32, 0.4); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.deadline-banner b { color: var(--warn); }
+.deadline-banner a { color: var(--text); }
+.tender.flash { border-color: var(--warn); box-shadow: 0 0 0 2px rgba(255, 176, 32, 0.4); }
