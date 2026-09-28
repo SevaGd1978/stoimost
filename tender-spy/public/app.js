@@ -55,10 +55,12 @@
 
   // ---------- навигация ----------
   function showView(name) {
+    if (name === 'users' && !isAdmin()) name = 'settings';
     $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     if (name === 'favorites') loadFavorites().catch((e) => toast(e.message, 'err'));
     if (name === 'crm') loadCrm().catch((e) => toast(e.message, 'err'));
+    if (name === 'users') loadUsers().catch((e) => toast(e.message, 'err'));
     if (name === 'watchlist') loadQueries();
     if (name === 'analytics') loadAnalytics();
     if (name === 'log') loadRuns();
@@ -1218,7 +1220,7 @@
       await loadFeed();
       connectEvents();
       const view = location.hash.replace('#', '');
-      if (['feed', 'favorites', 'crm', 'watchlist', 'analytics', 'settings', 'log'].includes(view)) showView(view);
+      if (['feed', 'favorites', 'crm', 'watchlist', 'analytics', 'settings', 'users', 'log'].includes(view)) showView(view);
       else if (!state.watchlist.nomenclature.length) showView('watchlist');
     } catch (err) {
       toast(`Не удалось загрузить: ${err.message}`, 'err');

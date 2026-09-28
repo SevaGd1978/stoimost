@@ -109,6 +109,7 @@
         <button class="nav-item" data-view="watchlist">🎯 Наблюдение</button>
         <button class="nav-item" data-view="analytics">📊 Аналитика</button>
         <button class="nav-item" data-view="settings">⚙️ Настройки</button>
+        <button class="nav-item admin-only" data-view="users">👥 Пользователи</button>
         <button class="nav-item" data-view="log">📜 Журнал опросов</button>
       </nav>
 
@@ -442,23 +443,31 @@
             <button class="btn btn-primary" type="submit">Сменить пароль</button>
           </form>
         </div>
+      </section>
 
-        <div class="card mt admin-only" id="users-card">
-          <div class="card-title">👥 Пользователи</div>
-          <p class="muted small">Администратор меняет номенклатуру, настройки, запуск опроса и учётные записи. Сотрудник смотрит ленту и аналитику, ведёт избранное и заметки, извлекает документы.</p>
+      <section class="view admin-only" id="view-users" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Пользователи</h1>
+            <p class="muted">Администратор добавляет сотрудников и других администраторов</p>
+          </div>
+        </header>
+        <div class="card" id="users-card">
+          <div class="card-title">Новая учётная запись</div>
+          <p class="muted small">Сотрудник смотрит ленту и аналитику, ведёт избранное и заметки, извлекает документы. Администратор дополнительно меняет номенклатуру, настройки, опрос и учётные записи.</p>
           <form class="form" id="form-user">
             <div class="form-row">
               <div class="field grow">
-                <label>Логин <span class="hint">латиница</span></label>
-                <input class="input" name="login" required autocomplete="off" placeholder="ivanova" />
+                <label>Логин <span class="hint">латиница, от 3 символов</span></label>
+                <input class="input" name="login" required autocomplete="off" placeholder="ivanova" maxlength="32" />
               </div>
               <div class="field grow">
                 <label>Имя</label>
-                <input class="input" name="name" placeholder="Иванова А.С." />
+                <input class="input" name="name" placeholder="Иванова А.С." maxlength="80" />
               </div>
               <div class="field grow">
-                <label>Пароль</label>
-                <input class="input" name="password" type="password" required autocomplete="new-password" />
+                <label>Пароль <span class="hint">от 8 символов</span></label>
+                <input class="input" name="password" type="password" required minlength="8" autocomplete="new-password" />
               </div>
               <div class="field">
                 <label>Роль</label>
@@ -468,8 +477,9 @@
                 </select>
               </div>
             </div>
-            <button class="btn btn-primary" type="submit">Добавить</button>
+            <button class="btn btn-primary" type="submit">Добавить пользователя</button>
           </form>
+          <div class="card-title mt">Кто уже есть</div>
           <div class="items" id="users-list"></div>
         </div>
       </section>
