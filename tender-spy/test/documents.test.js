@@ -217,3 +217,70 @@ test('findEisTwin: закупка B2B-Center находит копию в ЕИС
   assert.equal(findEisTwin(b2b, { [b2b.id]: b2b, [other.id]: other, [eis.id]: eis }), eis);
   assert.equal(findEisTwin(b2b, { [b2b.id]: b2b, [other.id]: other }), null);
 });
+
+function simpleEis(numbers, { failUrls = new Set() } = {}) {
+  const tenders = {};
+  const pages = {};
+  for (const n of numbers) {
+    const url = `https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber=${n}`;
+    tenders[`notice:${n}`] = { id: `notice:${n}`, source: 'zakupki', number: n, title: `Закупка ${n}`, url };
+    pages[url.replace('common-info', 'documents')] =
+      `<a href="https://zakupki.gov.ru/44fz/filestore/public/1.0/download/priz/file.html?uid=U${n}" title="ТЗ ${n}.pdf">ТЗ ${n}.pdf</a>`;
+  }
+  const order = [];
+  const fetchImpl = async (url) => {
+    order.push(url);
+    if (failUrls.has(url)) return { ok: false, status: 503, headers: {} };
+    if (pages[url]) return { ok: true, status: 200, headers: {}, text: async () => pages[url] };
+    if (/uid=U/.test(url)) {
+      const pdf = await pdfWithPages(1);
+      return { ok: true, status: 200, headers: {}, buffer: async () => pdf };
+    }
+    return { ok: false, status: 404, headers: {} };
+  };
+  return { tenders, fetchImpl, order };
+}
+
+test('DocumentService: вторая закупка ждёт в очереди, пока не закончится первая', async () => {
+  const { tenders, fetchImpl, order } = simpleEis(['0100000000126000001', '0100000000126000002']);
+  const store = { tenders, scheduleSave() {} };
+  const svc = new DocumentService({ store, fetchImpl, dataDir: tmpDir(), delayMs: 0, convert: { tools: () => ({ soffice: null }) }, log: { warn() {} } });
+  svc.start('notice:0100000000126000001');
+  const second = svc.start('notice:0100000000126000002');
+  assert.match(second.step, /В очереди/);
+  assert.match(tenders['notice:0100000000126000002'].documents.step, /В очереди/);
+  const a = await waitDone(svc, 'notice:0100000000126000001');
+  const b = await waitDone(svc, 'notice:0100000000126000002');
+  assert.equal(a.state, 'done');
+  assert.equal(b.state, 'done');
+  const firstOfB = order.findIndex((u) => u.includes('0100000000126000002'));
+  const lastOfA = order.findLastIndex((u) => u.includes('0100000000126000001'));
+  assert.ok(lastOfA < firstOfB, 'запросы второй закупки начались после первой');
+});
+
+test('DocumentService: неудачное обновление не стирает прошлый PDF', async () => {
+  const n = '0100000000126000003';
+  const docsUrl = `https://zakupki.gov.ru/epz/order/notice/ea20/view/documents.html?regNumber=${n}`;
+  const failUrls = new Set();
+  const { tenders, fetchImpl } = simpleEis([n], { failUrls });
+  const store = { tenders, scheduleSave() {} };
+  const svc = new DocumentService({ store, fetchImpl, dataDir: tmpDir(), delayMs: 0, convert: { tools: () => ({ soffice: null }) }, log: { warn() {} } });
+  const id = `notice:${n}`;
+  svc.start(id);
+  assert.equal((await waitDone(svc, id)).state, 'done');
+  const pdfBefore = fs.readFileSync(svc.pdfFile(id));
+
+  failUrls.add(docsUrl);
+  svc.start(id);
+  await waitDone(svc, id);
+  assert.equal(tenders[id].documents.state, 'done');
+  assert.match(tenders[id].documents.lastError, /HTTP 503/);
+  assert.deepEqual(fs.readFileSync(svc.pdfFile(id)), pdfBefore);
+  assert.equal(svc.get(id).state, 'done');
+  assert.equal(fs.existsSync(svc.buildDir(id)), false);
+
+  failUrls.clear();
+  svc.start(id);
+  await waitDone(svc, id);
+  assert.equal(tenders[id].documents.lastError, undefined, 'успешное обновление убирает старую ошибку');
+});

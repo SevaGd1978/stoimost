@@ -218,6 +218,7 @@
         ${extract('🔄 Обновить')}
         <button class="btn btn-sm btn-ghost" data-act="docs-list">Состав: ${d.files} док.${d.skipped ? `, пропущено ${d.skipped}` : ''}</button>
         <span class="muted docs-at">${fmtDateTime(d.at)}</span>
+        ${d.lastError ? `<span class="docs-error">Обновить не удалось (${esc(fmtDateTime(d.lastErrorAt))}): ${esc(d.lastError)}. Показан прошлый PDF.</span>` : ''}
         <div class="docs-list" hidden></div>`;
     }
     if (d?.state === 'error') {

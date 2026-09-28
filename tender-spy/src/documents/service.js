@@ -133,6 +133,8 @@ export class DocumentService {
     this.convert = { officeToPdf, extractArchive, tools, ...convert };
     this.jobs = new Map();
     this.listeners = new Set();
+    // По одной задаче за раз: LibreOffice и склейка больших PDF заметно едят память.
+    this.chain = Promise.resolve();
     for (const t of Object.values(store.tenders)) {
       if (t.documents?.state === 'running') t.documents = { ...t.documents, state: 'error', error: 'Извлечение прервано перезапуском сервера' };
     }
@@ -183,31 +185,62 @@ export class DocumentService {
     if (running?.state === 'running') return this.snapshot(running);
     const tender = this.store.tenders[id];
     if (!tender) throw new UserError('Тендер не найден');
-    const job = { tenderId: id, state: 'running', step: 'Ищем документы в ЕИС', startedAt: new Date().toISOString(), files: [], originals: [], notes: [], pages: 0, tender };
+    const busy = [...this.jobs.values()].some((j) => j.state === 'running');
+    const job = {
+      tenderId: id,
+      state: 'running',
+      step: busy ? 'В очереди: сначала закончим другую закупку' : 'Ищем документы в ЕИС',
+      startedAt: new Date().toISOString(),
+      files: [],
+      originals: [],
+      notes: [],
+      pages: 0,
+      tender,
+    };
+    const previous = this.pdfFile(id) ? { ...(tender.documents ?? {}), manifest: this.get(id) } : null;
     this.jobs.set(id, job);
-    this.setTenderInfo(id, { state: 'running', startedAt: job.startedAt });
-    this.run(job)
+    this.setTenderInfo(id, { state: 'running', step: job.step, startedAt: job.startedAt });
+    const task = async () => {
+      this.step(job, 'Ищем документы в ЕИС');
+      await this.run(job);
+    };
+    this.chain = this.chain
+      .then(task)
       .catch((err) => {
         job.state = 'error';
         job.error = err instanceof UserError ? err.message : `Не удалось извлечь документы: ${err.message}`;
         if (!(err instanceof UserError)) this.log.warn?.(`[documents] ${id}: ${err.stack || err.message}`);
       })
-      .finally(() => {
-        job.finishedAt = new Date().toISOString();
-        job.step = null;
-        this.writeManifest(job);
-        this.setTenderInfo(id, {
-          state: job.state,
-          at: job.finishedAt,
-          pages: job.pages,
-          files: job.files.filter((f) => f.pages).length,
-          skipped: job.files.filter((f) => !f.pages).length,
-          error: job.error,
-        });
-        this.jobs.delete(id);
-        this.emit(job);
-      });
+      .finally(() => this.finish(job, previous));
     return this.snapshot(job);
+  }
+
+  finish(job, previous) {
+    const id = job.tenderId;
+    job.finishedAt = new Date().toISOString();
+    job.step = null;
+    fs.rmSync(this.buildDir(id), { recursive: true, force: true });
+    if (job.state === 'error' && previous?.state === 'done') {
+      // Прошлый PDF цел: показываем его и сообщаем, что обновить не удалось.
+      const { manifest, ...info } = previous;
+      this.setTenderInfo(id, { ...info, lastError: job.error, lastErrorAt: job.finishedAt });
+    } else {
+      this.writeManifest(job);
+      this.setTenderInfo(id, {
+        state: job.state,
+        at: job.finishedAt,
+        pages: job.pages,
+        files: job.files.filter((f) => f.pages).length,
+        skipped: job.files.filter((f) => !f.pages).length,
+        error: job.error,
+      });
+    }
+    this.jobs.delete(id);
+    this.emit(job);
+  }
+
+  buildDir(id) {
+    return `${this.dirFor(id)}.building`;
   }
 
   setTenderInfo(id, info) {
@@ -257,7 +290,7 @@ export class DocumentService {
   async run(job) {
     const { tender, tenderId } = job;
     const L = this.limits;
-    const dir = this.dirFor(tenderId);
+    const dir = this.buildDir(tenderId);
     fs.rmSync(dir, { recursive: true, force: true });
     const originalsDir = path.join(dir, 'originals');
     const workDir = path.join(dir, 'work');
@@ -401,6 +434,9 @@ export class DocumentService {
     fs.writeFileSync(path.join(dir, 'documents.pdf'), await merged.save());
     fs.rmSync(workDir, { recursive: true, force: true });
     job.pages = merged.getPageCount();
+    const final = this.dirFor(tenderId);
+    fs.rmSync(final, { recursive: true, force: true });
+    fs.renameSync(dir, final);
     job.state = 'done';
   }
 
