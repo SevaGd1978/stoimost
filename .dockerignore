@@ -1,0 +1,8 @@
+.git
+node_modules
+tender-spy/node_modules
+tender-spy/data
+dist
+.env
+tender-spy/.env
+*.log

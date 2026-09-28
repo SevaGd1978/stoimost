@@ -1,0 +1,728 @@
+import express from 'express';
+import path from 'node:path';
+import { config } from './src/config.js';
+import { Store } from './src/store.js';
+import { isValidInn, normalizeInn } from './src/inn.js';
+import { ZakupkiSource, buildQueries } from './src/sources/zakupki.js';
+import { DemoSource } from './src/sources/demo.js';
+import { CombinedSource } from './src/sources/combined.js';
+import { PlatformsSource, enabledPlatforms } from './src/sources/platforms/source.js';
+import { PLATFORMS, platformInfo } from './src/sources/platforms/index.js';
+import { TelegramNotifier } from './src/notify.js';
+import { Scheduler } from './src/scheduler.js';
+import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js';
+import { createEisFetch, extraCaLabels } from './src/eis-tls.js';
+import { DocumentService, DocumentsError } from './src/documents/service.js';
+import { tools as documentTools } from './src/documents/convert.js';
+import { createAuth } from './src/auth.js';
+import { mountAuthRoutes } from './src/auth-routes.js';
+import { ensureBootstrapAdmin, publicUser, tenderPatchFor } from './src/accounts.js';
+import { CRM_STAGES, CrmError, isOpenStage, presentDeal } from './src/crm.js';
+import { legalCheckUrl } from './src/legal-check.js';
+import { collectProjectNews } from './src/news.js';
+import { collectCustomerVolume } from './src/procurement.js';
+import { parseNomenclatureFile } from './src/nomenclature-file.js';
+import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
+import {
+  CUSTOMER_TYPES,
+  METHOD_GROUPS,
+  SUBJECTS,
+  currentMatches,
+  customerTypeOf,
+  isSmpOnly,
+  methodGroupOf,
+  rejectReason,
+  settingsAllow,
+  subjectOf,
+} from './src/filters.js';
+
+let proxyDispatcher = undefined;
+if (config.proxy && typeof fetch === 'function') {
+  try {
+    const undici = await import('undici').catch(() => null);
+    if (undici?.ProxyAgent) {
+      proxyDispatcher = new undici.ProxyAgent(config.proxy);
+    }
+  } catch (err) {
+    console.warn('[config] Не удалось инициализировать ProxyAgent:', err.message);
+  }
+}
+
+const log = console;
+const store = new Store(config.dataFile);
+let bootAdmin = null;
+try {
+  bootAdmin = ensureBootstrapAdmin(store, { login: config.adminLogin, password: config.adminPassword });
+} catch (err) {
+  log.error(`[auth] администратор из переменной окружения не создан: ${err.message}`);
+}
+if (bootAdmin) log.info(`[auth] создан администратор «${bootAdmin.login}» из переменной окружения. Смените пароль в настройках.`);
+else if (!store.users.length) log.info('[auth] пользователей нет — при первом открытии сайта создайте администратора');
+const auth = createAuth({ store });
+
+const source =
+  config.mode === 'demo'
+    ? new DemoSource({ log })
+    : new CombinedSource([
+        new ZakupkiSource({
+          base: config.zakupkiBase,
+          userAgent: config.userAgent,
+          timeoutMs: config.requestTimeoutMs,
+          delayMs: config.requestDelayMs,
+          dispatcher: proxyDispatcher,
+          log,
+        }),
+        new PlatformsSource({
+          userAgent: config.userAgent,
+          timeoutMs: config.requestTimeoutMs,
+          dispatcher: proxyDispatcher,
+          log,
+        }),
+      ]);
+
+const volumeSource =
+  config.mode === 'demo'
+    ? null
+    : new ZakupkiSource({
+        base: config.zakupkiBase,
+        userAgent: config.userAgent,
+        timeoutMs: config.requestTimeoutMs,
+        dispatcher: proxyDispatcher,
+        log,
+      });
+
+const notifier = new TelegramNotifier({ token: config.telegram.token, chatId: config.telegram.chatId, log });
+const scheduler = new Scheduler({
+  store,
+  source,
+  notifier,
+  retentionDays: config.retentionDays,
+  collectNews: (nomenclature) => collectProjectNews({ keywords: nomenclature, mode: config.mode }),
+  log,
+});
+const documents = new DocumentService({
+  store,
+  fetchImpl: createEisFetch({ timeoutMs: 180_000 }),
+  dataDir: path.dirname(config.dataFile),
+  userAgent: config.userAgent,
+  platformName: (id) => PLATFORMS.find((p) => p.id === id)?.name || id,
+  log,
+});
+
+const app = express();
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '3mb' }));
+
+// Health check для мониторинга облачных платформ (Amvera, k8s, docker)
+app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.use(auth.attach);
+mountAuthRoutes(app, { store, auth, rootDir: config.rootDir });
+
+app.use(express.static(path.join(config.rootDir, 'public'), { extensions: ['html'] }));
+
+// ---- SSE: живые события для интерфейса --------------------------------------
+const sseClients = new Set();
+function broadcast(event, data) {
+  const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of sseClients) res.write(payload);
+}
+scheduler.on('run:start', (d) => broadcast('run:start', d));
+scheduler.on('run:done', ({ run, added }) => broadcast('run:done', { run, added: added.map(brief) }));
+scheduler.on('cards:done', (d) => broadcast('cards:done', d));
+scheduler.on('reminders', (due) =>
+  broadcast('reminders', due.map(({ tender, left }) => ({ ...brief(tender), deadlineAt: tender.deadlineAt, left }))),
+);
+scheduler.on('run:done', () => documents.cleanup());
+documents.cleanup();
+documents.onUpdate((job) => broadcast('documents', { tenderId: job.tenderId, state: job.state, step: job.step, pages: job.pages, error: job.error }));
+
+function brief(t) {
+  return { id: t.id, title: t.title, customer: t.customer, price: t.price, url: t.url, law: t.law, matches: t.matches };
+}
+
+app.get('/api/events', (req, res) => {
+  res.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+  res.flushHeaders();
+  res.write(`event: hello\ndata: ${JSON.stringify(scheduler.status)}\n\n`);
+  sseClients.add(res);
+  const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+  req.on('close', () => {
+    clearInterval(ping);
+    sseClients.delete(res);
+  });
+});
+
+// ---- state ------------------------------------------------------------------
+function stats() {
+  const all = Object.values(store.tenders);
+  return {
+    total: all.length,
+    unseen: all.filter((t) => !t.seen && !t.archived).length,
+    open: all.filter((t) => t.kind === 'notice' && t.isOpen && !t.archived).length,
+    contracts: all.filter((t) => t.kind === 'contract').length,
+    favorites: all.filter((t) => t.favorite).length,
+    crm: Object.values(store.deals).filter((d) => isOpenStage(d.stage)).length,
+  };
+}
+
+function analytics() {
+  const all = Object.values(store.tenders);
+  const active = all.filter((t) => !t.archived);
+
+  let totalPrice = 0;
+  let priceCount = 0;
+  let maxPrice = 0;
+  const byLaw = { 44: { count: 0, sum: 0 }, 223: { count: 0, sum: 0 }, 615: { count: 0, sum: 0 }, other: { count: 0, sum: 0 } };
+  const byKind = { notice: { count: 0, sum: 0 }, contract: { count: 0, sum: 0 } };
+  const byStage = {};
+  const customerMap = new Map();
+  const supplierMap = new Map();
+
+  for (const t of active) {
+    const p = typeof t.price === 'number' && Number.isFinite(t.price) ? t.price : 0;
+    if (p > 0) {
+      totalPrice += p;
+      priceCount++;
+      if (p > maxPrice) maxPrice = p;
+    }
+
+    const lawKey = byLaw[t.law] ? t.law : 'other';
+    byLaw[lawKey].count++;
+    byLaw[lawKey].sum += p;
+
+    const kindKey = t.kind === 'contract' ? 'contract' : 'notice';
+    byKind[kindKey].count++;
+    byKind[kindKey].sum += p;
+
+    const st = t.stage || 'Не указан';
+    if (!byStage[st]) byStage[st] = { count: 0, sum: 0 };
+    byStage[st].count++;
+    byStage[st].sum += p;
+
+    if (t.customer) {
+      const cur = customerMap.get(t.customer) || { name: t.customer, count: 0, sum: 0 };
+      cur.count++;
+      cur.sum += p;
+      customerMap.set(t.customer, cur);
+    }
+    if (t.supplier) {
+      const cur = supplierMap.get(t.supplier) || { name: t.supplier, count: 0, sum: 0 };
+      cur.count++;
+      cur.sum += p;
+      supplierMap.set(t.supplier, cur);
+    }
+  }
+
+  const topCustomers = Array.from(customerMap.values())
+    .sort((a, b) => b.sum - a.sum || b.count - a.count)
+    .slice(0, 10);
+  const topSuppliers = Array.from(supplierMap.values())
+    .sort((a, b) => b.sum - a.sum || b.count - a.count)
+    .slice(0, 10);
+
+  return {
+    totalTenders: active.length,
+    totalPrice,
+    avgPrice: priceCount > 0 ? Math.round(totalPrice / priceCount) : 0,
+    maxPrice,
+    byLaw,
+    byKind,
+    byStage,
+    topCustomers,
+    topSuppliers,
+  };
+}
+
+app.get('/api/state', (req, res) => {
+  res.json({
+    mode: config.mode,
+    user: req.user,
+    platforms: platformInfo(),
+    settings: store.settings,
+    watchlist: { companies: store.companies, nomenclature: store.nomenclature },
+    status: scheduler.status,
+    stats: stats(),
+    analytics: analytics(),
+    lastRun: store.runs[0] ?? null,
+    news: store.news,
+    facets: facets(),
+    documentTools: documentTools(),
+  });
+});
+
+/** Варианты для фильтров ленты: регионы — только те, что есть в карточках. */
+function facets() {
+  const regions = new Set();
+  for (const t of Object.values(store.tenders)) if (t.region && !t.archived) regions.add(t.region);
+  return {
+    regions: [...regions].sort((a, b) => a.localeCompare(b, 'ru')),
+    subjects: SUBJECTS,
+    customerTypes: CUSTOMER_TYPES,
+    methods: METHOD_GROUPS,
+  };
+}
+
+app.get('/api/analytics', (_req, res) => {
+  res.json(analytics());
+});
+
+// ---- tenders ----------------------------------------------------------------
+function filterTenders(query) {
+  const q = String(query.q ?? '').trim();
+  const kind = query.kind;
+  const law = query.law;
+  const company = query.company;
+  const nomen = query.nomen;
+  const src = query.source;
+  const onlyNew = query.onlyNew === '1';
+  const onlyOpen = query.onlyOpen === '1';
+  const favorite = query.favorite === '1';
+  const archived = query.archived === 'any' ? null : query.archived === '1';
+  let minPrice = parsePriceBound(query.minPrice);
+  let maxPrice = parsePriceBound(query.maxPrice);
+  if (minPrice != null && maxPrice != null && minPrice > maxPrice) [minPrice, maxPrice] = [maxPrice, minPrice];
+
+  let list = Object.values(store.tenders).filter((t) => archived === null || Boolean(t.archived) === archived);
+  // «По текущим настройкам»: позиции, которых уже нет в номенклатуре, другой закон или цена,
+  // минус-слова и уточняющие слова — всё, что отсёк бы сегодняшний опрос.
+  if (query.actual === '1') {
+    const ctx = { nomenclature: store.nomenclature, settings: store.settings };
+    list = list.filter(
+      (t) => t.favorite || (currentMatches(t, store.nomenclature).length && settingsAllow(t, store.settings) && !rejectReason(t, ctx)),
+    );
+  }
+  if (query.region) list = list.filter((t) => t.region === query.region);
+  if (SUBJECTS[query.subject]) list = list.filter((t) => subjectOf(t.title) === query.subject);
+  if (CUSTOMER_TYPES[query.ctype]) list = list.filter((t) => customerTypeOf(t) === query.ctype);
+  if (METHOD_GROUPS[query.method]) list = list.filter((t) => methodGroupOf(t) === query.method);
+  if (query.smp === 'only') list = list.filter((t) => isSmpOnly(t));
+  if (query.smp === 'exclude') list = list.filter((t) => !isSmpOnly(t));
+  const publishedDays = Number(query.published);
+  if (publishedDays > 0) {
+    const since = Date.now() - publishedDays * 86_400_000;
+    list = list.filter((t) => Date.parse(t.publishedAt ?? 0) >= since);
+  }
+  // Без известного срока подачи карточку оставляем: срок ещё не дочитан из ЕИС.
+  const minDays = Number(query.minDays);
+  if (minDays > 0) {
+    const until = Date.now() + minDays * 86_400_000;
+    list = list.filter((t) => t.kind !== 'notice' || !t.deadlineAt || Date.parse(t.deadlineAt) >= until);
+  }
+  if (kind && kind !== 'all') list = list.filter((t) => t.kind === kind);
+  if (law && law !== 'all') list = list.filter((t) => t.law === law);
+  if (company) list = list.filter((t) => t.matches.some((m) => m.type === 'company' && m.ref === company));
+  if (nomen) list = list.filter((t) => t.matches.some((m) => m.type !== 'company' && m.ref === nomen));
+  if (src && src !== 'all') list = list.filter((t) => (t.source || 'zakupki') === src || Boolean(t.links?.[src]));
+  if (onlyNew) list = list.filter((t) => !t.seen);
+  if (onlyOpen) list = list.filter((t) => t.kind === 'contract' || t.isOpen);
+  if (favorite) list = list.filter((t) => t.favorite);
+  if (minPrice != null || maxPrice != null) list = list.filter((t) => priceInRange(t.price, minPrice, maxPrice));
+  if (q) {
+    list = list.filter((t) =>
+      keywordMatches(q, `${t.title} ${t.customer ?? ''} ${t.supplier ?? ''} ${t.number} ${t.comment ?? ''}`) ||
+      t.number.includes(q) ||
+      Boolean(t.platformNumber?.includes(q)),
+    );
+  }
+
+  const sort = query.sort || 'fresh';
+  const by = {
+    fresh: (a, b) => Date.parse(b.firstSeenAt) - Date.parse(a.firstSeenAt) || Date.parse(b.publishedAt ?? 0) - Date.parse(a.publishedAt ?? 0),
+    published: (a, b) => Date.parse(b.publishedAt ?? 0) - Date.parse(a.publishedAt ?? 0),
+    deadline: (a, b) => Date.parse(a.deadlineAt ?? '2999-01-01') - Date.parse(b.deadlineAt ?? '2999-01-01'),
+    price_desc: (a, b) => (b.price ?? -1) - (a.price ?? -1),
+    price_asc: (a, b) => (a.price ?? Infinity) - (b.price ?? Infinity),
+    favorited: (a, b) => Date.parse(b.favoritedAt ?? 0) - Date.parse(a.favoritedAt ?? 0),
+  };
+  list.sort(by[sort] ?? by.fresh);
+  return list;
+}
+
+function withCrm(t) {
+  const stage = store.deals[t.id]?.stage;
+  const check = legalCheckUrl(t);
+  if (!stage && !check) return t;
+  return { ...t, ...(stage ? { crmStage: stage } : {}), ...(check ? { legalCheckUrl: check } : {}) };
+}
+
+app.get('/api/tenders', (req, res) => {
+  const list = filterTenders(req.query);
+  const limit = Math.min(Number(req.query.limit) || 200, 1000);
+  res.json({ total: list.length, items: list.slice(0, limit).map(withCrm) });
+});
+
+app.get('/api/customers/procurement', async (req, res) => {
+  try {
+    const report = await collectCustomerVolume({
+      inn: req.query.inn,
+      name: req.query.name,
+      tenders: Object.values(store.tenders),
+      fetchXml: volumeSource ? (url) => volumeSource.fetchXml(url) : null,
+      base: config.zakupkiBase,
+      mode: config.mode === 'demo' ? 'demo' : 'live',
+    });
+    res.json(report);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message || 'Не удалось собрать объём закупок' });
+  }
+});
+
+app.get('/api/tenders.csv', (req, res) => {
+  const list = filterTenders(req.query);
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const names = Object.fromEntries([['zakupki', 'ЕИС'], ...PLATFORMS.map((p) => [p.id, p.name])]);
+  const sourcesOf = (t) => Object.keys(t.links && Object.keys(t.links).length ? t.links : { [t.source || 'zakupki']: 1 }).map((id) => names[id] || id).join(', ');
+  const stageName = Object.fromEntries(CRM_STAGES.map((s) => [s.id, s.label]));
+  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Регион', 'Поставщик', 'Цена', 'Этап', 'Воронка', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Заметка', 'Ссылка'];
+  const rows = list.map((t) =>
+    [
+      t.kind === 'contract' ? 'Контракт' : 'Извещение',
+      t.law === 'other' ? '' : `${t.law}-ФЗ`,
+      t.number,
+      t.title,
+      t.customer,
+      t.region,
+      t.supplier,
+      t.price ?? '',
+      t.stage,
+      stageName[store.deals[t.id]?.stage] || '',
+      t.publishedAt ? t.publishedAt.slice(0, 10) : '',
+      t.deadlineAt ? t.deadlineAt.slice(0, 10) : '',
+      t.matches.map((m) => (m.type === 'company' ? `ИНН ${m.ref} ${m.label}` : m.label)).join('; '),
+      sourcesOf(t),
+      t.comment,
+      t.url,
+    ]
+      .map(esc)
+      .join(';'),
+  );
+  res.set('Content-Type', 'text/csv; charset=utf-8');
+  res.set('Content-Disposition', `attachment; filename="tenders-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send('\uFEFF' + [header.map(esc).join(';'), ...rows].join('\r\n'));
+});
+
+function sendCrm(res, deal, extra = {}) {
+  res.json({ ...presentDeal(deal, { tender: store.tenders[deal.id], owner: store.userById(deal.ownerId) }), ...extra });
+}
+
+function crmFail(res, err) {
+  const status = err instanceof CrmError ? err.status || 400 : 500;
+  res.status(status).json({ error: err.message || 'Ошибка' });
+}
+
+app.get('/api/crm', (_req, res) => {
+  const deals = Object.values(store.deals)
+    .map((deal) => presentDeal(deal, { tender: store.tenders[deal.id], owner: store.userById(deal.ownerId) }))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  res.json({
+    stages: CRM_STAGES,
+    users: store.users.filter((u) => !u.disabled).map(publicUser),
+    deals,
+  });
+});
+
+app.post('/api/crm', (req, res) => {
+  try {
+    const { deal, created } = store.openDeal(String(req.body?.tenderId || ''), req.user);
+    const body = presentDeal(deal, { tender: store.tenders[deal.id], owner: store.userById(deal.ownerId) });
+    res.status(created ? 201 : 200).json({ ...body, created });
+  } catch (err) {
+    crmFail(res, err);
+  }
+});
+
+app.patch('/api/crm/:id', (req, res) => {
+  try {
+    const deal = store.updateDeal(req.params.id, req.body ?? {}, req.user);
+    if (!deal) return res.status(404).json({ error: 'Карточки в воронке нет' });
+    sendCrm(res, deal);
+  } catch (err) {
+    crmFail(res, err);
+  }
+});
+
+app.post('/api/crm/:id/notes', (req, res) => {
+  try {
+    const deal = store.addDealNote(req.params.id, req.body?.text, req.user);
+    if (!deal) return res.status(404).json({ error: 'Карточки в воронке нет' });
+    sendCrm(res, deal);
+  } catch (err) {
+    crmFail(res, err);
+  }
+});
+
+app.delete('/api/crm/:id', auth.requireAdmin, (req, res) => {
+  if (!store.removeDeal(req.params.id)) return res.status(404).json({ error: 'Карточки в воронке нет' });
+  res.json({ ok: true });
+});
+
+app.patch('/api/tenders/:id', (req, res) => {
+  const t = store.patchTender(req.params.id, tenderPatchFor(req.user?.role, req.body ?? {}));
+  if (!t) return res.status(404).json({ error: 'Тендер не найден' });
+  res.json(t);
+});
+
+// ---- документация закупки → один PDF --------------------------------------
+app.post('/api/tenders/:id/documents', (req, res) => {
+  try {
+    res.status(202).json(documents.start(req.params.id));
+  } catch (err) {
+    res.status(err instanceof DocumentsError ? 404 : 500).json({ error: err.message });
+  }
+});
+
+app.get('/api/tenders/:id/documents', (req, res) => {
+  const job = documents.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Документы ещё не извлекались' });
+  res.json({ ...job, pdf: Boolean(documents.pdfFile(req.params.id)) });
+});
+
+app.get('/api/tenders/:id/documents.pdf', (req, res) => {
+  const file = documents.pdfFile(req.params.id);
+  if (!file) return res.status(404).json({ error: 'PDF ещё не собран' });
+  const number = store.tenders[req.params.id]?.number || 'tender';
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `inline; filename="documents-${number.replace(/[^\w-]/g, '')}.pdf"; filename*=UTF-8''${encodeURIComponent(`Документы ${number}.pdf`)}`);
+  res.sendFile(file);
+});
+
+app.get('/api/tenders/:id/documents/original/:index', (req, res) => {
+  const found = documents.originalFile(req.params.id, req.params.index);
+  if (!found) return res.status(404).json({ error: 'Файл не найден' });
+  res.download(found.file, found.name);
+});
+
+app.post('/api/tenders/mark-all-seen', auth.requireAdmin, (_req, res) => {
+  res.json({ marked: store.markAllSeen(), stats: stats() });
+});
+
+app.post('/api/tenders/archive-old', auth.requireAdmin, (_req, res) => {
+  res.json({ archived: store.archiveSeenAndClosed(), stats: stats() });
+});
+
+// ---- watchlist: предприятия -------------------------------------------------
+app.post('/api/companies', auth.requireAdmin, (req, res) => {
+  const inn = normalizeInn(req.body?.inn);
+  if (!isValidInn(inn)) return res.status(400).json({ error: 'Некорректный ИНН: нужно 10 или 12 цифр с верной контрольной суммой' });
+  const role = ['any', 'customer', 'supplier'].includes(req.body?.role) ? req.body.role : 'any';
+  const { company, created } = store.addCompany({ inn, name: req.body?.name, role, note: req.body?.note });
+  res.status(created ? 201 : 200).json(company);
+});
+
+app.post('/api/companies/batch', auth.requireAdmin, (req, res) => {
+  const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+  if (!rawItems.length) return res.status(400).json({ error: 'Передайте массив items' });
+  const overwrite = Boolean(req.body?.overwrite);
+  const validItems = [];
+  const invalid = [];
+
+  for (const raw of rawItems) {
+    const inn = normalizeInn(raw.inn);
+    if (!isValidInn(inn)) {
+      invalid.push({ raw, reason: 'Некорректный ИНН или контрольная сумма' });
+      continue;
+    }
+    const role = ['any', 'customer', 'supplier'].includes(raw.role) ? raw.role : 'any';
+    validItems.push({ inn, name: raw.name, role, note: raw.note });
+  }
+
+  const result = store.importCompanies(validItems, { overwriteExisting: overwrite });
+  result.invalid = invalid;
+  res.json(result);
+});
+
+app.patch('/api/companies/:id', auth.requireAdmin, (req, res) => {
+  const patch = {};
+  if (typeof req.body?.name === 'string' && req.body.name.trim()) patch.name = req.body.name.trim();
+  if (['any', 'customer', 'supplier'].includes(req.body?.role)) patch.role = req.body.role;
+  if (typeof req.body?.note === 'string') patch.note = req.body.note.trim();
+  const company = store.updateCompany(req.params.id, patch);
+  if (!company) return res.status(404).json({ error: 'Предприятие не найдено' });
+  res.json(company);
+});
+
+app.delete('/api/companies/:id', auth.requireAdmin, (req, res) => {
+  res.json({ removed: store.removeCompany(req.params.id) });
+});
+
+// ---- watchlist: номенклатура ------------------------------------------------
+app.post('/api/nomenclature', auth.requireAdmin, (req, res) => {
+  const context = req.body?.context ?? '';
+  const keyword = String(req.body?.keyword ?? '').trim();
+  const okpd2 = String(req.body?.okpd2 ?? '').trim();
+  if (!keyword && !okpd2) return res.status(400).json({ error: 'Укажите ключевые слова и/или код ОКПД2' });
+  if (okpd2 && !/^\d{2}(\.\d{1,3})*$/.test(okpd2)) return res.status(400).json({ error: 'ОКПД2 должен выглядеть как 24.20.13' });
+  if (keyword.length > 120) return res.status(400).json({ error: 'Слишком длинная фраза' });
+  const { item, created } = store.addNomenclature({ keyword, okpd2, context });
+  res.status(created ? 201 : 200).json(item);
+});
+
+app.patch('/api/nomenclature/:id', auth.requireAdmin, (req, res) => {
+  const item = store.updateNomenclature(req.params.id, { context: req.body?.context });
+  if (!item) return res.status(404).json({ error: 'Позиция не найдена' });
+  res.json(item);
+});
+
+app.delete('/api/nomenclature/:id', auth.requireAdmin, (req, res) => {
+  res.json({ removed: store.removeNomenclature(req.params.id) });
+});
+
+app.post('/api/nomenclature/import', auth.requireAdmin, (req, res) => {
+  const filename = String(req.body?.filename ?? 'nomenclature.csv');
+  const data = req.body?.data;
+  if (typeof data !== 'string' || !data.trim()) return res.status(400).json({ error: 'Файл не передан' });
+  let buffer;
+  try {
+    buffer = Buffer.from(data, 'base64');
+  } catch {
+    return res.status(400).json({ error: 'Не удалось прочитать файл' });
+  }
+  if (!buffer.length) return res.status(400).json({ error: 'Файл пустой' });
+  if (buffer.length > 2 * 1024 * 1024) return res.status(400).json({ error: 'Файл больше 2 МБ' });
+  try {
+    const parsed = parseNomenclatureFile(filename, buffer);
+    if (!parsed.items.length) {
+      const why = parsed.invalid[0]?.reason;
+      return res.status(400).json({
+        error: why ? `Нет позиций для импорта: строка ${parsed.invalid[0].line}: ${why}` : 'В файле нет позиций номенклатуры',
+        invalid: parsed.invalid,
+      });
+    }
+    const result = store.importNomenclature(parsed.items, { replace: Boolean(req.body?.replace) });
+    res.json({ ...result, invalid: parsed.invalid });
+  } catch (err) {
+    res.status(400).json({ error: err.message || 'Не удалось разобрать файл' });
+  }
+});
+
+// ---- watchlist: импорт/экспорт ----------------------------------------------
+app.get('/api/watchlist/export', auth.requireAdmin, (_req, res) => {
+  res.json(store.exportWatchlist());
+});
+
+app.post('/api/watchlist/import', auth.requireAdmin, (req, res) => {
+  const payload = req.body || {};
+  const replace = Boolean(req.body?.replace);
+  const rawCompanies = Array.isArray(payload.companies) ? payload.companies : [];
+  const rawNomen = Array.isArray(payload.nomenclature) ? payload.nomenclature : [];
+
+  const validCompanies = [];
+  const invalidCompanies = [];
+  for (const raw of rawCompanies) {
+    const inn = normalizeInn(raw.inn);
+    if (!isValidInn(inn)) {
+      invalidCompanies.push({ raw, reason: 'Некорректный ИНН' });
+      continue;
+    }
+    const role = ['any', 'customer', 'supplier'].includes(raw.role) ? raw.role : 'any';
+    validCompanies.push({ inn, name: raw.name, role, note: raw.note });
+  }
+
+  const validNomen = [];
+  for (const raw of rawNomen) {
+    const keyword = String(raw.keyword ?? '').trim();
+    const okpd2 = String(raw.okpd2 ?? '').trim();
+    if (keyword || okpd2) validNomen.push({ keyword, okpd2 });
+  }
+
+  const result = store.importWatchlist({ companies: validCompanies, nomenclature: validNomen }, { replace });
+  result.invalidCompanies = invalidCompanies;
+  res.json(result);
+});
+
+// ---- настройки, опрос, история -----------------------------------------------
+app.patch('/api/settings', auth.requireAdmin, (req, res) => {
+  const before = store.settings.pollIntervalMin;
+  const settings = store.updateSettings(req.body ?? {});
+  if (settings.pollIntervalMin !== before) scheduler.schedule();
+  res.json(settings);
+});
+
+app.post('/api/telegram/test', auth.requireAdmin, async (_req, res) => {
+  const result = await notifier.testConnection();
+  if (result.ok) res.json({ ok: true, message: 'Тестовое сообщение успешно отправлено в Telegram' });
+  else res.status(400).json({ ok: false, error: result.error || 'Не удалось отправить сообщение' });
+});
+
+app.post('/api/scan', auth.requireAdmin, async (_req, res) => {
+  if (scheduler.running) return res.status(409).json({ error: 'Опрос уже выполняется' });
+  const run = await scheduler.runOnce({ trigger: 'manual' });
+  res.json({ run, stats: stats(), news: store.news });
+});
+
+app.get('/api/news', (_req, res) => {
+  res.json(store.news || { updatedAt: null, keywords: [], items: [], searchUrl: '', note: '', warning: '' });
+});
+
+app.get('/api/runs', (_req, res) => res.json(store.runs));
+
+const searchCache = new Map();
+let searchRunning = false;
+app.get('/api/search', async (req, res) => {
+  const keywords = parseSearchKeywords(req.query.q);
+  if (!keywords.length) return res.status(400).json({ error: 'Передайте фразы: ?q=труба ППУ&q=скорлупа ППУ' });
+  if (keywords.length > SEARCH_LIMITS.keywords || keywords.some((k) => k.length > SEARCH_LIMITS.keywordLength)) {
+    return res.status(400).json({ error: `Не больше ${SEARCH_LIMITS.keywords} фраз по ${SEARCH_LIMITS.keywordLength} символов` });
+  }
+  const key = keywords.map((k) => k.toLowerCase()).sort().join('|');
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.at < SEARCH_LIMITS.cacheMs) return res.json(cached.body);
+  if (searchRunning || scheduler.running) return res.status(409).json({ error: 'Идёт другой поиск или опрос, повторите через минуту' });
+  searchRunning = true;
+  try {
+    const startedAt = new Date().toISOString();
+    const result = await source.collect({ nomenclature: keywords.map((keyword) => ({ keyword, okpd2: '' })), settings: searchSettings() });
+    const items = mergeFound(result.tenders);
+    const body = { startedAt, finishedAt: new Date().toISOString(), keywords, queriesRun: result.queriesRun, total: items.length, items, errors: result.errors };
+    searchCache.set(key, { at: Date.now(), body });
+    res.json(body);
+  } finally {
+    searchRunning = false;
+  }
+});
+
+app.get('/api/queries', (_req, res) => {
+  const eis = buildQueries({
+    nomenclature: store.nomenclature,
+    settings: store.settings,
+    base: config.zakupkiBase,
+  }).map(({ kind, label, url }) => ({ kind, label, url }));
+  if (config.mode === 'demo') return res.json(eis);
+  const keywords = [...new Set(store.nomenclature.map((n) => String(n.keyword ?? '').trim()).filter(Boolean))];
+  const platforms = enabledPlatforms(store.settings, PLATFORMS).flatMap((p) =>
+    keywords.map((keyword) => {
+      const req = p.request({ keyword, settings: store.settings });
+      return { kind: 'platform', label: `${p.name} · ${keyword}`, url: req.method === 'POST' ? `POST ${req.url}` : req.url };
+    }),
+  );
+  res.json([...eis, ...platforms]);
+});
+
+app.use('/api', (_req, res) => res.status(404).json({ error: 'Нет такого метода' }));
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  log.error(err);
+  res.status(500).json({ error: err.message || 'Внутренняя ошибка' });
+});
+
+const server = app.listen(config.port, '0.0.0.0', () => {
+  const cas = extraCaLabels();
+  log.info(
+    `Tender Spy → http://localhost:${config.port}  (режим: ${config.mode}, источник: ${scheduler.status.source}, интервал: ${store.settings.pollIntervalMin} мин)`,
+  );
+  log.info(cas.length ? `[tls] дополнительные CA: ${cas.join(', ')}` : '[tls] сертификаты Минцифры не найдены');
+  scheduler.start();
+});
+
+function shutdown() {
+  scheduler.stop();
+  try {
+    store.save();
+  } catch (err) {
+    log.error('[store] не удалось сохранить при выходе:', err.message);
+  }
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1500).unref();
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

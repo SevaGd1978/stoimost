@@ -1,0 +1,1269 @@
+/* Tender Spy — клиент. Ванильный JS, без сборки. */
+(() => {
+  'use strict';
+
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+  const state = {
+    mode: 'live',
+    settings: null,
+    platforms: [],
+    watchlist: { companies: [], nomenclature: [] },
+    status: null,
+    stats: null,
+    tenders: [],
+    favorites: [],
+    browserNotify: localStorage.getItem('ts.browserNotify') === '1',
+  };
+
+  // ---------- helpers ----------
+  const fmtPrice = (n) => (n == null ? '—' : Math.round(n).toLocaleString('ru-RU'));
+  const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '—');
+  const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : '—');
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+  function toast(msg, type = '') {
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = msg;
+    $('#toasts').appendChild(el);
+    setTimeout(() => el.remove(), 4200);
+  }
+
+  async function api(url, opts = {}) {
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+      body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401) {
+      location.assign('/login');
+      throw new Error('Нужно войти');
+    }
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  const isAdmin = () => state.user?.role === 'admin';
+
+  function daysLeft(iso) {
+    if (!iso) return null;
+    return Math.ceil((Date.parse(iso) - Date.now()) / 86400000);
+  }
+
+  // ---------- навигация ----------
+  function showView(name) {
+    if (name === 'users' && !isAdmin()) name = 'settings';
+    $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
+    $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+    if (name === 'favorites') loadFavorites().catch((e) => toast(e.message, 'err'));
+    if (name === 'crm') loadCrm().catch((e) => toast(e.message, 'err'));
+    if (name === 'users') loadUsers().catch((e) => toast(e.message, 'err'));
+    if (name === 'watchlist') loadQueries();
+    if (name === 'analytics') loadAnalytics();
+    if (name === 'news') renderNews();
+    if (name === 'log') loadRuns();
+    location.hash = name;
+  }
+  $$('.nav-item').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+
+  // ---------- state ----------
+  async function loadState() {
+    const s = await api('/api/state');
+    Object.assign(state, { mode: s.mode, user: s.user, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun, facets: s.facets || {}, news: s.news || null });
+    renderNews();
+    renderStatus();
+    renderWatchlist();
+    renderSettings();
+    applyRole();
+    fillFilterSelects();
+    if (isAdmin()) loadUsers().catch((e) => toast(e.message, 'err'));
+  }
+
+  function renderNews() {
+    const n = state.news;
+    const box = $('#news-list');
+    const link = $('#news-search');
+    if (!box) return;
+    if (n?.searchUrl) {
+      link.href = n.searchUrl;
+      link.hidden = false;
+    } else {
+      link.hidden = true;
+    }
+    if (!n?.updatedAt) {
+      $('#news-summary').textContent = 'Обновляется кнопкой «Опросить сейчас» по номенклатуре из «Наблюдения»';
+      box.innerHTML = '<p class="muted">Пока пусто. Добавьте ключевые слова номенклатуры и нажмите «Опросить сейчас».</p>';
+      return;
+    }
+    const words = (n.keywords || []).join(', ');
+    $('#news-summary').textContent = `Обновлено ${fmtDateTime(n.updatedAt)}${words ? ` · ${words}` : ''}`;
+    const cards = (n.items || [])
+      .map((item) => {
+        const title = item.url
+          ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.title)}</a>`
+          : `<b>${esc(item.title)}</b>`;
+        return `<article class="news-card">
+          <div class="news-meta">${esc(item.source || 'Новости')}${item.publishedAt ? ` · ${fmtDate(item.publishedAt)}` : ''}</div>
+          <div>${title}</div>
+          ${item.summary ? `<p>${esc(item.summary)}</p>` : ''}
+        </article>`;
+      })
+      .join('');
+    box.innerHTML = `
+      ${n.warning ? `<p class="docs-error">${esc(n.warning)}</p>` : ''}
+      ${cards || '<p class="muted">По этим словам новостей о стройках не нашлось.</p>'}
+      ${n.note ? `<p class="news-meta">${esc(n.note)}</p>` : ''}`;
+  }
+
+  function applyRole() {
+    const admin = isAdmin();
+    document.body.classList.toggle('is-admin', admin);
+    $('#acc-name').textContent = state.user?.name || state.user?.login || '—';
+    $('#acc-role').textContent = admin ? 'администратор' : 'сотрудник';
+    for (const id of ['#set-interval', '#set-onlyopen', '#set-price-min', '#set-price-max', '#set-minus', '#set-fz44', '#set-fz223', '#set-fz615', '#set-telegram']) {
+      const el = $(id);
+      if (el) el.disabled = !admin;
+    }
+    $$('#set-platforms input').forEach((el) => {
+      el.disabled = !admin;
+    });
+  }
+
+  function renderStatus() {
+    const { status, stats, mode } = state;
+    const enabled = state.platforms.filter((p) => state.settings?.platforms?.[p.id] !== false).length;
+    $('#st-mode').textContent = mode === 'demo' ? 'демо (без сети)' : `ЕИС + площадок: ${enabled} (live)`;
+    $('#st-last').textContent = state.lastRun ? fmtDateTime(state.lastRun.finishedAt) : '—';
+    $('#st-next').textContent = status?.nextRunAt ? fmtDateTime(status.nextRunAt) : '—';
+    $('#st-tg').textContent = status?.telegram ? (state.settings?.notifyTelegram ? 'вкл' : 'настроен, выкл') : 'не настроен';
+    $('#s-open').textContent = stats?.open ?? 0;
+    $('#s-unseen').textContent = stats?.unseen ?? 0;
+    $('#s-contracts').textContent = stats?.contracts ?? 0;
+    $('#s-fav').textContent = stats?.favorites ?? 0;
+    const favBadge = $('#badge-fav');
+    favBadge.hidden = !(stats?.favorites > 0);
+    favBadge.textContent = stats?.favorites ?? 0;
+    const crmBadge = $('#badge-crm');
+    crmBadge.hidden = !(stats?.crm > 0);
+    crmBadge.textContent = stats?.crm ?? 0;
+    const badge = $('#badge-unseen');
+    badge.hidden = !(stats?.unseen > 0);
+    badge.textContent = stats?.unseen ?? 0;
+    document.title = (stats?.unseen ? `(${stats.unseen}) ` : '') + 'Tender Spy';
+    $('#scan-progress').hidden = !status?.running;
+    $('#btn-scan').disabled = Boolean(status?.running);
+    $('#source-note').textContent =
+      mode === 'demo'
+        ? 'Сервер запущен в демо-режиме: карточки сгенерированы локально и лишь имитируют выдачу ЕИС. Запустите без флага --demo для реальных данных.'
+        : `Данные берутся из RSS расширенного поиска ЕИС (zakupki.gov.ru) по ключевым словам и кодам ОКПД2, а также из открытых реестров площадок: ${state.platforms.map((p) => p.name).join(', ')}. Площадки ищут только по ключевым словам, продажа имущества в выдачу не попадает. Извещение, найденное и в ЕИС, и на площадке, показывается одной карточкой. Поиск по ИНН не выполняется.`;
+  }
+
+  // ---------- лента ----------
+  function filterParams() {
+    const p = new URLSearchParams();
+    const q = $('#f-q').value.trim();
+    if (q) p.set('q', q);
+    const nomen = $('#f-nomen').value;
+    if (nomen) p.set('nomen', nomen);
+    p.set('kind', $('#f-kind').value);
+    p.set('law', $('#f-law').value);
+    p.set('source', $('#f-source').value);
+    p.set('sort', $('#f-sort').value);
+    const minPrice = $('#f-min').value.trim();
+    const maxPrice = $('#f-max').value.trim();
+    if (minPrice) p.set('minPrice', minPrice);
+    if (maxPrice) p.set('maxPrice', maxPrice);
+    if ($('#f-new').checked) p.set('onlyNew', '1');
+    if ($('#f-open').checked) p.set('onlyOpen', '1');
+    if ($('#f-fav').checked) p.set('favorite', '1');
+    if ($('#f-arch').checked) p.set('archived', '1');
+    if ($('#f-actual').checked) p.set('actual', '1');
+    for (const [id, key] of [['#f-region', 'region'], ['#f-subject', 'subject'], ['#f-ctype', 'ctype'], ['#f-method', 'method'], ['#f-smp', 'smp'], ['#f-published', 'published']]) {
+      if ($(id).value) p.set(key, $(id).value);
+    }
+    const minDays = $('#f-mindays').value.trim();
+    if (minDays && Number(minDays) > 0) p.set('minDays', minDays);
+    return p;
+  }
+
+  async function loadFeed() {
+    const p = filterParams();
+    const data = await api(`/api/tenders?${p}`);
+    state.tenders = data.items;
+    $('#btn-csv').href = `/api/tenders.csv?${p}`;
+    $('#feed-summary').textContent = `Показано ${data.items.length} из ${data.total}`;
+    renderFeed();
+  }
+
+  function whyChip(m) {
+    const label = m.type === 'company' ? `ИНН ${m.ref} · ${m.label}${m.via === 'contract' ? ' (контракт)' : ''}` : m.type === 'okpd2' ? `ОКПД2 ${m.ref}` : `«${m.label}»`;
+    return `<span class="why ${m.type === 'company' ? 'company' : ''} ${m.strong === false ? 'weak' : ''}" title="${m.strong === false ? 'Совпадение по выдаче ЕИС, в тексте карточки не подтверждено' : 'Подтверждено в тексте карточки'}">${esc(label)}</span>`;
+  }
+
+  function sourceName(id) {
+    if (!id || id === 'zakupki') return 'ЕИС';
+    return state.platforms.find((p) => p.id === id)?.name || id;
+  }
+
+  function sourceTags(t) {
+    const links = t.links && Object.keys(t.links).length ? t.links : { [t.source || 'zakupki']: t.url };
+    const ids = Object.keys(links).sort((a, b) => (a === 'zakupki' ? -1 : b === 'zakupki' ? 1 : 0));
+    return ids
+      .map((id) => `<a class="tag src" href="${esc(links[id])}" target="_blank" rel="noopener" title="Открыть на площадке">${esc(sourceName(id))}</a>`)
+      .join('');
+  }
+
+  function renderTender(t, { inFavorites = false } = {}) {
+    const left = daysLeft(t.deadlineAt);
+    const dlClass = left == null ? '' : left < 0 ? 'over' : left <= 3 ? 'soon' : '';
+    const dlText = t.deadlineAt ? (t.kind === 'contract' ? `исполнение до ${fmtDate(t.deadlineAt)}` : left < 0 ? `подача завершена ${fmtDate(t.deadlineAt)}` : `подача до ${fmtDate(t.deadlineAt)} (${left} дн.)`) : '';
+    return `
+      <article class="tender ${t.seen ? '' : 'unseen'} ${t.archived ? 'archived' : ''}" data-id="${esc(t.id)}">
+        <div>
+          <div class="tender-top">
+            ${t.seen ? '' : '<span class="tag new">новое</span>'}
+            <span class="tag kind-${t.kind}">${t.kind === 'contract' ? 'контракт' : 'извещение'}</span>
+            ${t.law !== 'other' ? `<span class="tag law-${t.law}">${t.law}-${t.law === '615' ? 'ПП' : 'ФЗ'}</span>` : ''}
+            ${t.stage ? `<span class="tag ${t.isOpen ? 'stage-open' : 'stage-closed'}">${esc(t.stage)}</span>` : ''}
+            ${sourceTags(t)}
+            <span>№ ${esc(t.number)}</span>
+            ${t.platformNumber ? `<span>· на площадке ${esc(t.platformNumber)}</span>` : ''}
+            ${t.method ? `<span>· ${esc(t.method)}</span>` : ''}
+            <span>· размещено ${fmtDate(t.publishedAt)}</span>
+          </div>
+          <div class="tender-title"><a href="${esc(t.url)}" target="_blank" rel="noopener">${esc(t.title)}</a></div>
+          <div class="tender-meta">
+            ${t.customer ? `<span>Заказчик: <b>${esc(t.customer)}</b></span>` : ''}
+            ${t.supplier ? `<span>Поставщик: <b>${esc(t.supplier)}</b></span>` : ''}
+            ${t.region ? `<span>${esc(t.region)}</span>` : ''}
+          </div>
+          <div class="tender-why">${t.matches.map(whyChip).join('')}</div>
+          ${
+            inFavorites
+              ? `<div class="tender-note"><textarea class="input note-input" rows="2" maxlength="2000" placeholder="Заметка: что уточнить, решение, контакты заказчика…">${esc(t.comment || '')}</textarea><span class="note-status"></span></div>
+                 <div class="tender-docs" data-docs>${renderDocs(t)}</div>
+                 ${customerTools(t)}`
+              : `${t.comment ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>` : ''}${t.favorite ? customerTools(t) : ''}`
+          }
+          ${
+            !inFavorites && t.documents?.state === 'done'
+              ? `<div class="tender-note-view"><a href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">📑 Документы в PDF · ${t.documents.pages} стр.</a></div>`
+              : ''
+          }
+        </div>
+        <div class="tender-right">
+          <div class="price">${fmtPrice(t.price)} <small>₽</small></div>
+          <div class="deadline ${dlClass}">${esc(dlText)}</div>
+          <div class="tender-actions">
+            <button class="btn btn-sm" data-act="crm" title="Вести закупку в воронке участия">${t.crmStage ? '📋 В воронке' : '📋 В воронку'}</button>
+            <button class="btn btn-sm fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="${t.favorite ? 'Убрать из избранного' : 'Отложить для дальнейшего рассмотрения'}">${t.favorite ? '★ В избранном' : '☆ В избранное'}</button>
+            <button class="btn btn-sm btn-icon" data-act="seen" title="${t.seen ? 'Отметить как новое' : 'Прочитано'}">${t.seen ? '↺' : '✓'}</button>
+            ${isAdmin() ? `<button class="btn btn-sm btn-icon" data-act="archive" title="${t.archived ? 'Вернуть из архива' : 'В архив'}">${t.archived ? '📤' : '🗄️'}</button>` : ''}
+          </div>
+        </div>
+      </article>`;
+  }
+
+  function legalCheckLink(t) {
+    if (!t.legalCheckUrl) return '';
+    const byInn = t.legalCheckUrl.includes('/contragents/');
+    const title = byInn
+      ? 'Карточка заказчика на Saby: надёжность, выручка, долги, суды и исполнительные производства'
+      : 'Поиск заказчика на Чекко: ИНН в карточке ещё нет';
+    return `<a class="btn btn-sm" href="${esc(t.legalCheckUrl)}" target="_blank" rel="noopener" title="${esc(title)}">⚖ Юридическая проверка</a>`;
+  }
+
+  function volumeButton(t) {
+    if (!t.customer && !t.customerInn) return '';
+    return `<button type="button" class="btn btn-sm" data-act="volume" title="Бесплатный реестр контрактов ЕИС и закупки этого заказчика, уже найденные Tender Spy">📊 Объём закупок</button>`;
+  }
+
+  function customerTools(t) {
+    const html = `${legalCheckLink(t)}${volumeButton(t)}`;
+    return html.trim() ? `<div class="tender-docs">${html}</div>` : '';
+  }
+
+  function docsUrl(t, suffix = '') {
+    return `/api/tenders/${encodeURIComponent(t.id)}/documents${suffix}`;
+  }
+
+  function renderDocs(t) {
+    const d = t.documents;
+    if (d?.state === 'running') {
+      return `<span class="docs-progress"><span class="spinner"></span> ${esc(d.step || 'Извлекаем документы…')}</span>`;
+    }
+    const extract = (label) =>
+      `<button class="btn btn-sm" data-act="docs" title="Скачать документацию закупки из ЕИС и собрать её в один PDF">${label}</button>`;
+    if (d?.state === 'done') {
+      return `
+        <a class="btn btn-sm btn-primary" href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">📑 Открыть PDF · ${d.pages} стр.</a>
+        ${extract('🔄 Обновить')}
+        <button class="btn btn-sm btn-ghost" data-act="docs-list">Состав: ${d.files} док.${d.skipped ? `, пропущено ${d.skipped}` : ''}</button>
+        <span class="muted docs-at">${fmtDateTime(d.at)}</span>
+        ${d.lastError ? `<span class="docs-error">Обновить не удалось (${esc(fmtDateTime(d.lastErrorAt))}): ${esc(d.lastError)}. Показан прошлый PDF.</span>` : ''}
+        <div class="docs-list" hidden></div>`;
+    }
+    if (d?.state === 'error') {
+      return `${extract('📄 Извлечь документы')}<span class="docs-error">${esc(d.error || 'Не удалось извлечь документы')}</span>`;
+    }
+    return extract('📄 Извлечь документы');
+  }
+
+  const DOC_STATUS = { ok: '✓', truncated: '✂️', skipped: '—', error: '⚠️' };
+
+  function renderDocsList(t, m) {
+    const files = m.files
+      .map(
+        (f) => `<li class="doc-${f.status}"><span class="doc-mark">${DOC_STATUS[f.status] || ''}</span>
+          <span>${esc(f.name)}${f.from ? ` <small class="muted">из ${esc(f.from)}</small>` : ''}${f.pages ? ` <small class="muted">· с ${f.startPage + (m.coverPages || 0)}-й стр., ${f.pages} стр.</small>` : ''}${f.note ? `<br><small class="muted">${esc(f.note)}</small>` : ''}</span></li>`,
+      )
+      .join('');
+    const originals = (m.originals || [])
+      .map((o) => `<a href="${docsUrl(t, `/original/${o.index}`)}" download>${esc(o.name)}</a>`)
+      .join(' · ');
+    const notes = (m.notes || []).map((n) => `<div><small class="muted">${esc(n)}</small></div>`).join('');
+    return `<ul>${files}</ul>${notes}${originals ? `<div class="docs-originals"><small class="muted">Оригиналы из ЕИС:</small> ${originals}</div>` : ''}`;
+  }
+
+  function updateDocsBlock(id) {
+    const t = findTender(id);
+    const box = $(`#fav-list .tender[data-id="${CSS.escape(id)}"] [data-docs]`);
+    if (t && box) box.innerHTML = renderDocs(t);
+  }
+
+  function renderFeed() {
+    const list = $('#feed-list');
+    list.innerHTML = state.tenders.map(renderTender).join('');
+    $('#feed-empty').hidden = state.tenders.length > 0;
+  }
+
+  function findTender(id) {
+    return state.tenders.find((x) => x.id === id) || state.favorites.find((x) => x.id === id);
+  }
+
+  const refreshLists = () => Promise.all([loadFeed(), loadFavorites(), loadState()]);
+
+  for (const listSel of ['#feed-list', '#fav-list']) {
+    $(listSel).addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-act]');
+      if (!btn) return;
+      const t = findTender(btn.closest('.tender').dataset.id);
+      if (!t) return;
+      if (btn.dataset.act === 'docs') return extractDocs(t);
+      if (btn.dataset.act === 'docs-list') return toggleDocsList(t, btn);
+      if (btn.dataset.act === 'crm') return openInCrm(t);
+      if (btn.dataset.act === 'volume') return openVolume(t);
+      const patch =
+        btn.dataset.act === 'favorite' ? { favorite: !t.favorite } : btn.dataset.act === 'seen' ? { seen: !t.seen } : { archived: !t.archived, seen: true };
+      try {
+        await api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: patch });
+        if (btn.dataset.act === 'favorite') toast(patch.favorite ? 'Добавлено в «Избранное»' : 'Убрано из «Избранного»', 'ok');
+        await refreshLists();
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    });
+
+    // клик по ссылке — считаем прочитанным
+    $(listSel).addEventListener('click', (e) => {
+      const a = e.target.closest('.tender-title a');
+      if (!a) return;
+      const t = findTender(a.closest('.tender').dataset.id);
+      if (t && !t.seen) api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { seen: true } }).then(refreshLists);
+    });
+  }
+
+  async function extractDocs(t) {
+    try {
+      const job = await api(docsUrl(t), { method: 'POST' });
+      t.documents = { state: job.state, step: job.step };
+      updateDocsBlock(t.id);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }
+
+  function fmtCompact(n) {
+    const v = Number(n) || 0;
+    if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млрд`;
+    if (v >= 1_000_000) return `${(v / 1_000_000).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} млн`;
+    if (v >= 1_000) return `${Math.round(v / 1_000).toLocaleString('ru-RU')} тыс.`;
+    return fmtPrice(v);
+  }
+
+  function renderVolumeChart(series) {
+    if (!series.length) return '';
+    const max = Math.max(...series.map((s) => s.sum), 1);
+    const w = 640;
+    const h = 220;
+    const padT = 26;
+    const padB = 28;
+    const gap = 8;
+    const plotH = h - padT - padB;
+    const barW = Math.max(16, Math.min(56, (w - 24 - gap * series.length) / series.length));
+    const totalW = series.length * barW + (series.length - 1) * gap;
+    const x0 = (w - totalW) / 2;
+    const showSum = series.length <= 8;
+    const bars = series
+      .map((s, i) => {
+        const bh = s.sum > 0 ? Math.max(4, (s.sum / max) * plotH) : 2;
+        const x = x0 + i * (barW + gap);
+        const y = padT + (plotH - bh);
+        const sum = showSum ? `<text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" fill="#e6ecff" font-size="11">${esc(fmtCompact(s.sum))}</text>` : '';
+        return `<g><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="4" fill="${s.sum ? '#5ee1a8' : '#24325c'}"></rect>${sum}<text x="${(x + barW / 2).toFixed(1)}" y="${h - 8}" text-anchor="middle" fill="#8b97bf" font-size="12">${s.year}</text></g>`;
+      })
+      .join('');
+    return `<svg class="volume-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Объём закупок по годам">${bars}</svg>`;
+  }
+
+  function renderVolume(report) {
+    const rows = (report.series || [])
+      .map((s) => `<tr><td>${s.year}</td><td>${s.count}</td><td>${fmtPrice(s.sum)}</td></tr>`)
+      .join('');
+    const items = (report.items || [])
+      .map((item) => `<tr><td>${fmtDate(item.publishedAt)}</td><td>${esc(item.title)}</td><td>${fmtPrice(item.price)}</td></tr>`)
+      .join('');
+    const sources = (report.sources || [])
+      .map((s) => `<li><b>${esc(s.label)}</b>: ${s.count}${s.note ? ` — ${esc(s.note)}` : ''}</li>`)
+      .join('');
+    return `
+      ${report.warning ? `<p class="docs-error">${esc(report.warning)}</p>` : ''}
+      <div class="volume-total">${esc(report.basisLabel || '')}${report.total ? `: ${fmtPrice(report.total.sum)} ₽` : ''}</div>
+      ${renderVolumeChart(report.series || [])}
+      ${rows ? `<table class="table"><thead><tr><th>Год</th><th>Закупок</th><th>Сумма, ₽</th></tr></thead><tbody>${rows}</tbody></table>` : ''}
+      ${items ? `<table class="table"><thead><tr><th>Дата</th><th>Закупка</th><th>Сумма, ₽</th></tr></thead><tbody>${items}</tbody></table>` : ''}
+      ${sources ? `<ul class="volume-sources">${sources}</ul>` : ''}
+      ${report.note ? `<p class="volume-note">${esc(report.note)}</p>` : ''}`;
+  }
+
+  async function openVolume(t) {
+    $('#volume-title').textContent = 'Объём закупок';
+    $('#volume-sub').textContent = t.customer || 'Заказчик';
+    $('#volume-registry').hidden = true;
+    $('#volume-body').innerHTML = '<p class="volume-note"><span class="spinner"></span> Ищем контракты заказчика в бесплатном реестре ЕИС…</p>';
+    $('#modal-volume').hidden = false;
+    const params = new URLSearchParams();
+    if (t.customerInn) params.set('inn', t.customerInn);
+    if (t.customer) params.set('name', t.customer);
+    try {
+      const report = await api(`/api/customers/procurement?${params}`);
+      $('#volume-title').textContent = report.customer?.name || t.customer || 'Объём закупок';
+      const bits = [report.customer?.inn ? `ИНН ${report.customer.inn}` : '', report.total?.count ? `${report.total.count} зап.` : ''].filter(Boolean);
+      $('#volume-sub').textContent = bits.join(' · ');
+      $('#volume-body').innerHTML = renderVolume(report);
+      if (report.registryUrl) {
+        $('#volume-registry').href = report.registryUrl;
+        $('#volume-registry').hidden = false;
+      }
+    } catch (err) {
+      $('#volume-body').innerHTML = `<p class="docs-error">${esc(err.message)}</p>`;
+    }
+  }
+
+  $('#volume-close').addEventListener('click', () => {
+    $('#modal-volume').hidden = true;
+  });
+
+  async function toggleDocsList(t, btn) {
+    const box = btn.parentElement.querySelector('.docs-list');
+    if (!box.hidden) {
+      box.hidden = true;
+      return;
+    }
+    try {
+      box.innerHTML = renderDocsList(t, await api(docsUrl(t)));
+      box.hidden = false;
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }
+
+  // ---------- избранное ----------
+  function favoriteParams() {
+    const p = new URLSearchParams({ favorite: '1', archived: 'any', sort: $('#fv-sort').value, limit: '1000' });
+    const q = $('#fv-q').value.trim();
+    if (q) p.set('q', q);
+    if ($('#fv-open').checked) p.set('onlyOpen', '1');
+    return p;
+  }
+
+  async function loadFavorites() {
+    const p = favoriteParams();
+    const data = await api(`/api/tenders?${p}`);
+    state.favorites = data.items;
+    $('#btn-fav-csv').href = `/api/tenders.csv?${p}`;
+    const filtered = p.has('q') || p.has('onlyOpen');
+    $('#fav-summary').textContent = data.total
+      ? `${filtered ? 'Найдено' : 'Отобрано для дальнейшего рассмотрения'}: ${data.total}`
+      : 'Закупки, отобранные для дальнейшего рассмотрения';
+    // Не перерисовываем список, пока пользователь печатает заметку.
+    if (document.activeElement?.classList.contains('note-input') && $('#fav-list').contains(document.activeElement)) return;
+    renderDeadlineBanner();
+    $('#fav-list').innerHTML = state.favorites.map((t) => renderTender(t, { inFavorites: true })).join('');
+    $('#fav-empty').hidden = state.favorites.length > 0;
+    $('#fav-empty h3').textContent = filtered ? 'Ничего не найдено' : 'В избранном пока пусто';
+  }
+
+  function renderDeadlineBanner() {
+    const soon = state.favorites
+      .filter((t) => t.kind === 'notice' && t.isOpen !== false && !t.archived)
+      .map((t) => ({ t, left: daysLeft(t.deadlineAt) }))
+      .filter(({ left }) => left != null && left >= 0 && left <= 3)
+      .sort((a, b) => Date.parse(a.t.deadlineAt) - Date.parse(b.t.deadlineAt));
+    const box = $('#fav-deadlines');
+    box.hidden = !soon.length;
+    box.innerHTML = soon.length
+      ? `<b>⏰ Скоро окончание подачи: ${soon.length}</b>` +
+        soon
+          .map(({ t, left }) => `<a href="#" data-jump="${esc(t.id)}">${esc(t.title.slice(0, 90))}${t.title.length > 90 ? '…' : ''}</a> <span class="muted">— до ${fmtDateTime(t.deadlineAt)}, ${left <= 1 ? 'меньше суток' : `${left} дн.`}</span>`)
+          .map((line) => `<div>${line}</div>`)
+          .join('')
+      : '';
+  }
+
+  $('#fav-deadlines').addEventListener('click', (e) => {
+    const a = e.target.closest('[data-jump]');
+    if (!a) return;
+    e.preventDefault();
+    const card = $(`#fav-list .tender[data-id="${CSS.escape(a.dataset.jump)}"]`);
+    card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card?.classList.add('flash');
+    setTimeout(() => card?.classList.remove('flash'), 1500);
+  });
+
+  $('#fav-list').addEventListener('change', async (e) => {
+    const input = e.target.closest('.note-input');
+    if (!input) return;
+    const t = findTender(input.closest('.tender').dataset.id);
+    if (!t) return;
+    const status = input.parentElement.querySelector('.note-status');
+    try {
+      const saved = await api(`/api/tenders/${encodeURIComponent(t.id)}`, { method: 'PATCH', body: { comment: input.value } });
+      t.comment = saved.comment;
+      status.textContent = 'сохранено';
+      setTimeout(() => (status.textContent = ''), 2000);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  let favTimer;
+  $('#fv-q').addEventListener('input', () => {
+    clearTimeout(favTimer);
+    favTimer = setTimeout(() => loadFavorites().catch((e) => toast(e.message, 'err')), 200);
+  });
+  ['#fv-sort', '#fv-open'].forEach((s) => $(s).addEventListener('change', () => loadFavorites().catch((e) => toast(e.message, 'err'))));
+
+  let feedTimer;
+  const debouncedFeed = () => {
+    clearTimeout(feedTimer);
+    feedTimer = setTimeout(() => loadFeed().catch((e) => toast(e.message, 'err')), 200);
+  };
+  ['#f-q', '#f-min', '#f-max', '#f-mindays'].forEach((s) => $(s).addEventListener('input', debouncedFeed));
+  ['#f-nomen', '#f-kind', '#f-law', '#f-source', '#f-sort', '#f-new', '#f-open', '#f-fav', '#f-arch', '#f-actual', '#f-region', '#f-subject', '#f-ctype', '#f-method', '#f-smp', '#f-published'].forEach((s) =>
+    $(s).addEventListener('change', debouncedFeed),
+  );
+
+  $('#btn-mark-seen').addEventListener('click', async () => {
+    const r = await api('/api/tenders/mark-all-seen', { method: 'POST' });
+    toast(`Отмечено прочитанными: ${r.marked}`, 'ok');
+    await Promise.all([loadFeed(), loadState()]);
+  });
+
+  $('#btn-archive-old').addEventListener('click', async () => {
+    if (!confirm('Убрать из ленты в архив все просмотренные и закрытые закупки?\nИзбранные и новые открытые останутся. Архив — галочка «Архив» в фильтрах.')) return;
+    const r = await api('/api/tenders/archive-old', { method: 'POST' });
+    toast(r.archived ? `Убрано в архив: ${r.archived}` : 'Нечего убирать', 'ok');
+    await Promise.all([loadFeed(), loadState()]);
+  });
+
+  function fillFilterSelects() {
+    const ns = $('#f-nomen');
+    const curN = ns.value;
+    ns.innerHTML = '<option value="">Вся номенклатура</option>' + state.watchlist.nomenclature.map((n) => `<option value="${esc(n.keyword || n.okpd2)}">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</option>`).join('');
+    ns.value = curN;
+    const ss = $('#f-source');
+    const curS = ss.value;
+    ss.innerHTML =
+      '<option value="all">Все площадки</option><option value="zakupki">ЕИС</option>' +
+      state.platforms.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+    ss.value = [...ss.options].some((o) => o.value === curS) ? curS : 'all';
+    const f = state.facets || {};
+    fillSelect('#f-region', 'Все регионы', (f.regions || []).map((r) => [r, r]));
+    fillSelect('#f-ctype', 'Любой заказчик', Object.entries(f.customerTypes || {}));
+    fillSelect('#f-method', 'Любой способ', Object.entries(f.methods || {}));
+  }
+
+  function fillSelect(sel, allLabel, options) {
+    const el = $(sel);
+    const cur = el.value;
+    el.innerHTML = `<option value="">${esc(allLabel)}</option>` + options.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
+    el.value = options.some(([v]) => v === cur) ? cur : '';
+  }
+
+  // ---------- наблюдение ----------
+  function renderWatchlist() {
+    $('#nomen-list').innerHTML =
+      state.watchlist.nomenclature
+        .map(
+          (n) => `
+        <div class="item" data-id="${esc(n.id)}">
+          <div class="item-main">
+            <div class="item-title">${esc(n.keyword || `ОКПД2 ${n.okpd2}`)}</div>
+            <div class="item-sub">${n.okpd2 ? `ОКПД2 <code>${esc(n.okpd2)}</code>` : 'полнотекстовый поиск'}${n.context?.length ? ` · в названии одно из: ${esc(n.context.join(', '))}` : ''}</div>
+          </div>
+          ${isAdmin() ? '<button class="btn btn-sm" data-act="context" title="Уточняющие слова">✏️</button>' : ''}
+          <button class="btn btn-sm" data-act="feed" title="Показать в ленте">📡</button>
+          ${isAdmin() ? '<button class="btn btn-sm btn-danger" data-act="del" title="Удалить">✕</button>' : ''}
+        </div>`,
+        )
+        .join('') || '<div class="muted small">Добавьте ключевые слова или ОКПД2.</div>';
+  }
+
+  // Экспорт и импорт Watchlist (JSON)
+  $('#btn-export-wl').addEventListener('click', async () => {
+    try {
+      const data = await api('/api/watchlist/export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tender-spy-watchlist-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Список наблюдения экспортирован', 'ok');
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  function bytesToBase64(bytes) {
+    let bin = '';
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    return btoa(bin);
+  }
+
+  function resetImportFile() {
+    const input = $('#import-file');
+    if (input) input.value = '';
+    const name = $('#import-file-name');
+    if (name) name.textContent = 'Файл не выбран';
+  }
+
+  $('#import-file')?.addEventListener('change', () => {
+    const file = $('#import-file').files[0];
+    $('#import-file-name').textContent = file ? file.name : 'Файл не выбран';
+  });
+
+  $('#btn-import-wl').addEventListener('click', () => {
+    $('#modal-import').hidden = false;
+  });
+  $('#btn-import-close').addEventListener('click', () => {
+    $('#modal-import').hidden = true;
+    resetImportFile();
+  });
+  $('#btn-import-confirm').addEventListener('click', async () => {
+    const file = $('#import-file')?.files?.[0];
+    const replace = $('#import-replace').checked;
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) return toast('Файл больше 2 МБ', 'err');
+      try {
+        const data = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+        const res = await api('/api/nomenclature/import', { method: 'POST', body: { filename: file.name, data, replace } });
+        const invalid = res.invalid?.length ? `, не разобрано строк: ${res.invalid.length}` : '';
+        toast(`Добавлено позиций: ${res.added}, уже были: ${res.skipped}${invalid}`, 'ok');
+        $('#modal-import').hidden = true;
+        $('#import-json-input').value = '';
+        resetImportFile();
+        await loadState();
+        loadQueries();
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+      return;
+    }
+    const raw = $('#import-json-input').value.trim();
+    if (!raw) return toast('Выберите файл или вставьте JSON', 'err');
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      return toast(`Невалидный JSON: ${e.message}`, 'err');
+    }
+    try {
+      const payload = Array.isArray(parsed) ? { nomenclature: parsed } : parsed;
+      const res = await api('/api/watchlist/import', { method: 'POST', body: { ...payload, replace } });
+      toast(`Импортировано позиций номенклатуры: ${res.nomenclature?.added || 0}`, 'ok');
+      $('#modal-import').hidden = true;
+      $('#import-json-input').value = '';
+      await loadState();
+      loadQueries();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#form-nomen').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const n = await api('/api/nomenclature', { method: 'POST', body: Object.fromEntries(fd) });
+      toast(`Добавлено: ${n.keyword || `ОКПД2 ${n.okpd2}`}`, 'ok');
+      e.target.reset();
+      await loadState();
+      loadQueries();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#nomen-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const item = btn.closest('.item');
+    const n = state.watchlist.nomenclature.find((x) => x.id === item.dataset.id);
+    if (btn.dataset.act === 'del') {
+      await api(`/api/nomenclature/${n.id}`, { method: 'DELETE' });
+      await loadState();
+      loadQueries();
+    } else if (btn.dataset.act === 'context') {
+      const value = prompt(
+        `Уточняющие слова для «${n.keyword || n.okpd2}».\nВ названии закупки должно быть хотя бы одно из них. Через запятую; пусто — без условия.`,
+        (n.context || []).join(', '),
+      );
+      if (value === null) return;
+      try {
+        await api(`/api/nomenclature/${n.id}`, { method: 'PATCH', body: { context: value } });
+        toast('Уточняющие слова сохранены', 'ok');
+        await Promise.all([loadState(), loadFeed()]);
+      } catch (err) {
+        toast(err.message, 'err');
+      }
+    } else {
+      $('#f-nomen').value = n.keyword || n.okpd2;
+      showView('feed');
+      loadFeed();
+    }
+  });
+
+  async function loadQueries() {
+    const qs = await api('/api/queries').catch(() => []);
+    $('#queries-preview').innerHTML = qs.length
+      ? qs.map((q) => `<div><b>${esc(q.label)}</b>${esc(q.url)}</div>`).join('')
+      : '<div>Список наблюдения пуст — запросов нет.</div>';
+  }
+
+  // ---------- настройки ----------
+  function renderSettings() {
+    const s = state.settings;
+    if (!s) return;
+    $('#set-interval').value = s.pollIntervalMin;
+    $('#set-onlyopen').checked = s.onlyOpen;
+    $('#set-price-min').value = s.priceMin != null ? fmtPrice(s.priceMin) : '';
+    $('#set-price-max').value = s.priceMax != null ? fmtPrice(s.priceMax) : '';
+    $('#set-minus').value = (s.minusWords || []).join(', ');
+    $('#set-fz44').checked = s.laws.fz44;
+    $('#set-fz223').checked = s.laws.fz223;
+    $('#set-fz615').checked = s.laws.fz615;
+    $('#set-platforms').innerHTML = state.platforms
+      .map(
+        (p) => `<label class="switch"><input type="checkbox" data-platform="${esc(p.id)}" ${s.platforms?.[p.id] !== false ? 'checked' : ''} />
+          ${esc(p.name)} <span class="hint">${esc(new URL(p.site).hostname.replace(/^www\./, ''))}</span></label>`,
+      )
+      .join('');
+    $('#set-telegram').checked = s.notifyTelegram;
+    $('#set-telegram').disabled = !state.status?.telegram;
+    $('#tg-hint').textContent = state.status?.telegram ? '' : '(токен не задан)';
+    $('#set-browser').checked = state.browserNotify;
+    applyRole();
+  }
+
+  $('#btn-save-settings').addEventListener('click', async () => {
+    try {
+      await api('/api/settings', {
+        method: 'PATCH',
+        body: {
+          pollIntervalMin: Number($('#set-interval').value),
+          onlyOpen: $('#set-onlyopen').checked,
+          priceMin: $('#set-price-min').value.trim() || null,
+          priceMax: $('#set-price-max').value.trim() || null,
+          minusWords: $('#set-minus').value,
+          searchContracts: false,
+          laws: { fz44: $('#set-fz44').checked, fz223: $('#set-fz223').checked, fz615: $('#set-fz615').checked },
+          platforms: Object.fromEntries($$('#set-platforms input[data-platform]').map((el) => [el.dataset.platform, el.checked])),
+        },
+      });
+      toast('Настройки сохранены', 'ok');
+      await Promise.all([loadState(), loadFeed()]);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#set-telegram').addEventListener('change', async (e) => {
+    await api('/api/settings', { method: 'PATCH', body: { notifyTelegram: e.target.checked } });
+    await loadState();
+  });
+
+  $('#btn-test-tg').addEventListener('click', async () => {
+    $('#btn-test-tg').disabled = true;
+    try {
+      const res = await api('/api/telegram/test', { method: 'POST' });
+      toast(res.message || 'Тест успешен!', 'ok');
+    } catch (err) {
+      toast(`Ошибка Telegram: ${err.message}`, 'err');
+    } finally {
+      $('#btn-test-tg').disabled = false;
+    }
+  });
+
+  $('#btn-logout').addEventListener('click', async () => {
+    try {
+      await api('/api/logout', { method: 'POST' });
+    } catch {
+      /* страница входа всё равно очистит доступ */
+    }
+    location.assign('/login');
+  });
+
+  $('#form-password').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/api/me/password', { method: 'POST', body: { current: fd.get('current'), next: fd.get('next') } });
+      e.target.reset();
+      toast('Пароль изменён', 'ok');
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  async function loadUsers() {
+    state.users = await api('/api/users');
+    const me = state.user?.id;
+    $('#users-list').innerHTML = state.users.length
+      ? state.users
+          .map(
+            (u) => `<div class="item" data-id="${esc(u.id)}">
+          <div class="item-main">
+            <div class="item-title">${esc(u.name)} <span class="role">${u.role === 'admin' ? 'администратор' : 'сотрудник'}</span>${u.disabled ? ' <span class="role">отключён</span>' : ''}</div>
+            <div class="item-sub">${esc(u.login)}${u.id === me ? ' · это вы' : ''}</div>
+          </div>
+          ${
+            u.id === me
+              ? ''
+              : `<button class="btn btn-sm" data-act="role">${u.role === 'admin' ? 'Сделать сотрудником' : 'Сделать администратором'}</button>
+          <button class="btn btn-sm" data-act="disable">${u.disabled ? 'Включить' : 'Отключить'}</button>
+          <button class="btn btn-sm" data-act="reset">Пароль</button>
+          <button class="btn btn-sm btn-danger" data-act="del">✕</button>`
+          }
+        </div>`,
+          )
+          .join('')
+      : '<div class="muted small">Пользователей нет</div>';
+  }
+
+  $('#form-user').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      await api('/api/users', { method: 'POST', body: Object.fromEntries(fd) });
+      e.target.reset();
+      toast('Пользователь добавлен', 'ok');
+      await loadUsers();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#users-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = btn.closest('.item')?.dataset.id;
+    const user = (state.users || []).find((u) => u.id === id);
+    if (!user) return;
+    try {
+      if (btn.dataset.act === 'del') {
+        if (!confirm(`Удалить учётную запись ${user.login}?`)) return;
+        await api(`/api/users/${id}`, { method: 'DELETE' });
+      } else if (btn.dataset.act === 'role') {
+        await api(`/api/users/${id}`, { method: 'PATCH', body: { role: user.role === 'admin' ? 'employee' : 'admin' } });
+      } else if (btn.dataset.act === 'disable') {
+        await api(`/api/users/${id}`, { method: 'PATCH', body: { disabled: !user.disabled } });
+      } else if (btn.dataset.act === 'reset') {
+        const password = prompt(`Новый пароль для ${user.login} (от 8 символов)`);
+        if (!password) return;
+        await api(`/api/users/${id}`, { method: 'PATCH', body: { password } });
+        toast('Пароль обновлён, старые входы закрыты', 'ok');
+      }
+      await loadUsers();
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#set-browser').addEventListener('change', async (e) => {
+    if (e.target.checked) {
+      if (!('Notification' in window)) {
+        toast('Браузер не поддерживает уведомления', 'err');
+        e.target.checked = false;
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        toast('Разрешение на уведомления не выдано', 'err');
+        e.target.checked = false;
+        return;
+      }
+    }
+    state.browserNotify = e.target.checked;
+    localStorage.setItem('ts.browserNotify', state.browserNotify ? '1' : '0');
+  });
+
+  // ---------- аналитика ----------
+  async function loadAnalytics() {
+    try {
+      const data = await api('/api/analytics');
+      $('#an-total-price').textContent = `${fmtPrice(data.totalPrice)} ₽`;
+      $('#an-count').textContent = `${data.totalTenders} активных позиций`;
+      $('#an-avg-price').textContent = `${fmtPrice(data.avgPrice)} ₽`;
+      $('#an-max-price').textContent = `${fmtPrice(data.maxPrice)} ₽`;
+
+      const sum44 = data.byLaw['44']?.sum || 0;
+      const sum223 = data.byLaw['223']?.sum || 0;
+      const totalLaws = sum44 + sum223 || 1;
+      const pct44 = Math.round((sum44 / totalLaws) * 100);
+      const pct223 = 100 - pct44;
+      $('#an-laws-ratio').textContent = `${pct44}% / ${pct223}%`;
+      $('#an-laws-sub').textContent = `44-ФЗ: ${fmtPrice(sum44)} ₽ · 223-ФЗ: ${fmtPrice(sum223)} ₽`;
+
+      const lawsTb = $('#an-laws-table tbody');
+      const rows = [
+        { label: '44-ФЗ (госзакупки)', ...data.byLaw['44'] },
+        { label: '223-ФЗ (госкомпании)', ...data.byLaw['223'] },
+        { label: '615-ПП (капремонт)', ...data.byLaw['615'] },
+        { label: 'Извещения (все)', ...data.byKind.notice },
+        { label: 'Контракты (выигранные)', ...data.byKind.contract },
+      ];
+      lawsTb.innerHTML = rows
+        .map((r) => `<tr><td>${esc(r.label)}</td><td>${r.count || 0}</td><td>${fmtPrice(r.sum || 0)} ₽</td></tr>`)
+        .join('');
+
+      const stagesTb = $('#an-stages-table tbody');
+      const stKeys = Object.keys(data.byStage || {});
+      stagesTb.innerHTML = stKeys.length
+        ? stKeys
+            .map((k) => `<tr><td>${esc(k)}</td><td>${data.byStage[k].count}</td><td>${fmtPrice(data.byStage[k].sum)} ₽</td></tr>`)
+            .join('')
+        : '<tr><td colspan="3" class="muted">Нет данных</td></tr>';
+
+      const custTb = $('#an-customers-table tbody');
+      custTb.innerHTML = data.topCustomers?.length
+        ? data.topCustomers
+            .map((c) => `<tr><td>${esc(c.name)}</td><td>${c.count}</td><td>${fmtPrice(c.sum)} ₽</td></tr>`)
+            .join('')
+        : '<tr><td colspan="3" class="muted">Нет заказчиков</td></tr>';
+
+      const suppTb = $('#an-suppliers-table tbody');
+      suppTb.innerHTML = data.topSuppliers?.length
+        ? data.topSuppliers
+            .map((s) => `<tr><td>${esc(s.name)}</td><td>${s.count}</td><td>${fmtPrice(s.sum)} ₽</td></tr>`)
+            .join('')
+        : '<tr><td colspan="3" class="muted">Нет поставщиков</td></tr>';
+    } catch (err) {
+      toast(`Ошибка аналитики: ${err.message}`, 'err');
+    }
+  }
+
+  $('#btn-refresh-analytics').addEventListener('click', () => loadAnalytics());
+
+  // ---------- журнал ----------
+  async function loadRuns() {
+    const runs = await api('/api/runs');
+    const tb = $('#runs-table tbody');
+    tb.innerHTML = runs.length
+      ? runs
+          .map(
+            (r) => `<tr>
+          <td>${fmtDateTime(r.startedAt)}</td>
+          <td>${r.trigger === 'timer' ? 'таймер' : 'вручную'}</td>
+          <td>${r.queriesRun}</td>
+          <td>${r.found}</td>
+          <td><b>${r.added}</b></td>
+          <td>${(r.errors || []).map((e) => `<div class="err">${esc(e.query)}: ${esc(e.message)}</div>`).join('') || '—'}</td>
+        </tr>`,
+          )
+          .join('')
+      : '<tr><td colspan="6" class="muted">Опросов ещё не было</td></tr>';
+  }
+
+  // ---------- опрос ----------
+  $('#btn-scan').addEventListener('click', async () => {
+    $('#btn-scan').disabled = true;
+    $('#scan-progress').hidden = false;
+    try {
+      const { run, news } = await api('/api/scan', { method: 'POST' });
+      if (news) state.news = news;
+      renderNews();
+      if (run.skipped) toast('Опрос уже идёт', '');
+      else if (run.errors?.length && !run.found) toast(`Опрос завершён с ошибками: ${run.errors[0].message}`, 'err');
+      else toast(`Найдено ${run.found}, новых ${run.added}. Новостей о стройках: ${news?.items?.length || 0}`, run.added || news?.items?.length ? 'ok' : '');
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally {
+      await Promise.all([loadState(), loadFeed()]);
+    }
+  });
+
+  // ---------- SSE ----------
+  function connectEvents() {
+    const es = new EventSource('/api/events');
+    es.addEventListener('run:start', () => {
+      $('#scan-progress').hidden = false;
+      $('#btn-scan').disabled = true;
+    });
+    es.addEventListener('run:done', async (e) => {
+      const { run, added } = JSON.parse(e.data);
+      await Promise.all([loadState(), loadFeed()]);
+      if (added.length && state.browserNotify && Notification.permission === 'granted') {
+        const first = added[0];
+        const n = new Notification(`Tender Spy: ${added.length} новых закупок`, {
+          body: `${first.title}\n${first.customer || ''} · ${fmtPrice(first.price)} ₽`,
+          icon: '/favicon.ico',
+        });
+        n.onclick = () => {
+          window.focus();
+          window.open(first.url, '_blank');
+        };
+      }
+      if (run.trigger === 'timer' && added.length) toast(`Автоопрос: ${added.length} новых закупок`, 'ok');
+    });
+    es.addEventListener('cards:done', () => refreshLists().catch(() => {}));
+    es.addEventListener('reminders', (e) => {
+      const due = JSON.parse(e.data);
+      toast(`⏰ Скоро окончание подачи по избранным: ${due.length}`, 'ok');
+      if (state.browserNotify && Notification.permission === 'granted') {
+        const first = due[0];
+        const n = new Notification(`Tender Spy: скоро окончание подачи (${due.length})`, {
+          body: `${first.title.slice(0, 120)} — осталось ${first.left <= 1 ? 'меньше суток' : `${first.left} дн.`}`,
+          icon: '/favicon.ico',
+        });
+        n.onclick = () => {
+          window.focus();
+          showView('favorites');
+        };
+      }
+      loadFavorites().catch(() => {});
+    });
+    es.addEventListener('documents', (e) => {
+      const d = JSON.parse(e.data);
+      const t = findTender(d.tenderId);
+      if (d.state === 'running') {
+        if (t) t.documents = { ...t.documents, state: 'running', step: d.step };
+        updateDocsBlock(d.tenderId);
+        return;
+      }
+      if (d.state === 'done') toast(`Документы собраны в PDF: ${d.pages} стр.`, 'ok');
+      else toast(d.error || 'Не удалось извлечь документы', 'err');
+      loadFavorites().catch(() => {});
+    });
+    es.onerror = () => {
+      es.close();
+      fetch('/api/me').then((r) => {
+        if (r.status === 401) location.assign('/login');
+        else setTimeout(connectEvents, 5000);
+      });
+    };
+  }
+
+  // ---------- воронка ----------
+  const crmState = { stages: [], users: [], deals: [], current: null };
+  let crmDrag = false;
+
+  async function openInCrm(t) {
+    try {
+      const deal = await api('/api/crm', { method: 'POST', body: { tenderId: t.id } });
+      toast(deal.created ? 'Закупка в воронке' : 'Уже в воронке', 'ok');
+      t.crmStage = deal.stage;
+      showView('crm');
+      openCrmModal(deal);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }
+
+  async function loadCrm() {
+    const data = await api('/api/crm');
+    crmState.stages = data.stages || [];
+    crmState.users = data.users || [];
+    crmState.deals = data.deals || [];
+    renderCrm();
+  }
+
+  function renderCrm() {
+    const mine = $('#crm-mine').checked;
+    const deals = crmState.deals.filter((d) => !mine || d.ownerId === state.user?.id);
+    $('#crm-empty').hidden = crmState.deals.length > 0;
+    $('#crm-board').hidden = crmState.deals.length === 0;
+    $('#crm-board').innerHTML = crmState.stages
+      .map((stage) => {
+        const items = deals.filter((d) => d.stage === stage.id);
+        const sum = items.reduce((acc, d) => acc + (typeof d.card.price === 'number' ? d.card.price : 0), 0);
+        return `<section class="kanban-col ${stage.id === 'won' || stage.id === 'lost' ? 'closed' : ''}" data-stage="${esc(stage.id)}">
+          <div class="kanban-head">${esc(stage.label)} <span>${items.length}${sum ? ` · ${fmtPrice(sum)} ₽` : ''}</span></div>
+          ${items.map(crmCard).join('') || '<div class="muted small">Пусто</div>'}
+        </section>`;
+      })
+      .join('');
+  }
+
+  function crmCard(d) {
+    const left = daysLeft(d.card.deadlineAt);
+    const when = d.nextStepAt ? `до ${fmtDate(d.nextStepAt)}` : '';
+    return `<article class="crm-card" draggable="true" data-id="${esc(d.id)}">
+      <div class="title">${esc(d.card.title || d.card.number || d.id)}</div>
+      <div class="meta">${esc(d.card.customer || 'Заказчик не указан')}${d.card.price != null ? ` · ${fmtPrice(d.card.price)} ₽` : ''}</div>
+      <div class="meta">${d.ownerName ? esc(d.ownerName) : 'без ответственного'}${left != null && left >= 0 ? ` · подача ${left} дн.` : ''}</div>
+      ${d.nextStep ? `<div class="next">${esc(d.nextStep)}${when ? ` · ${esc(when)}` : ''}</div>` : ''}
+    </article>`;
+  }
+
+  function fillCrmForm(deal) {
+    crmState.current = deal;
+    $('#crm-title').textContent = deal.card.title || 'Закупка';
+    const bits = [deal.card.customer, deal.card.number ? `№ ${deal.card.number}` : '', deal.card.region].filter(Boolean);
+    $('#crm-sub').textContent = bits.join(' · ');
+    $('#crm-stage').innerHTML = crmState.stages.map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join('');
+    $('#crm-stage').value = deal.stage;
+    $('#crm-owner').innerHTML = '<option value="">Не назначен</option>' + crmState.users.map((u) => `<option value="${esc(u.id)}">${esc(u.name || u.login)}</option>`).join('');
+    $('#crm-owner').value = crmState.users.some((u) => u.id === deal.ownerId) ? deal.ownerId : '';
+    $('#crm-bid').value = deal.bid != null ? fmtPrice(deal.bid) : '';
+    $('#crm-next').value = deal.nextStep || '';
+    $('#crm-next-at').value = deal.nextStepAt || '';
+    $('#crm-lost').value = deal.lostReason || '';
+    $('#crm-lost-row').hidden = deal.stage !== 'lost';
+    $('#crm-link').href = deal.card.url || '#';
+    $('#crm-log').innerHTML = (deal.activities || [])
+      .slice()
+      .reverse()
+      .map((a) => `<div><b>${esc(a.name)}</b> · ${fmtDateTime(a.at)}<br>${esc(a.text)}</div>`)
+      .join('') || '<div>Комментариев пока нет</div>';
+    $('#modal-crm').hidden = false;
+  }
+
+  async function openCrmModal(deal) {
+    if (!crmState.stages.length) await loadCrm();
+    const fresh = crmState.deals.find((d) => d.id === deal.id) || deal;
+    fillCrmForm(fresh);
+  }
+
+  $('#crm-board').addEventListener('click', (e) => {
+    const card = e.target.closest('.crm-card');
+    if (!card || crmDrag) return;
+    const deal = crmState.deals.find((d) => d.id === card.dataset.id);
+    if (deal) fillCrmForm(deal);
+  });
+  $('#crm-board').addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.crm-card');
+    if (!card) return;
+    crmDrag = true;
+    e.dataTransfer.setData('text/plain', card.dataset.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  $('#crm-board').addEventListener('dragend', () => setTimeout(() => { crmDrag = false; }, 80));
+  $('#crm-board').addEventListener('dragover', (e) => {
+    const col = e.target.closest('.kanban-col');
+    if (!col) return;
+    e.preventDefault();
+    $$('.kanban-col').forEach((c) => c.classList.toggle('dragover', c === col));
+  });
+  $('#crm-board').addEventListener('dragleave', (e) => {
+    if (!e.target.closest('.kanban-col')) return;
+    e.target.closest('.kanban-col').classList.remove('dragover');
+  });
+  $('#crm-board').addEventListener('drop', async (e) => {
+    const col = e.target.closest('.kanban-col');
+    if (!col) return;
+    e.preventDefault();
+    $$('.kanban-col').forEach((c) => c.classList.remove('dragover'));
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id || crmState.deals.find((d) => d.id === id)?.stage === col.dataset.stage) return;
+    try {
+      await api(`/api/crm/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stage: col.dataset.stage } });
+      await Promise.all([loadCrm(), loadState()]);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+  $('#crm-mine').addEventListener('change', () => renderCrm());
+  $('#crm-stage').addEventListener('change', () => {
+    $('#crm-lost-row').hidden = $('#crm-stage').value !== 'lost';
+  });
+  $('#crm-close').addEventListener('click', () => { $('#modal-crm').hidden = true; });
+  $('#crm-save').addEventListener('click', async () => {
+    const deal = crmState.current;
+    if (!deal) return;
+    try {
+      const saved = await api(`/api/crm/${encodeURIComponent(deal.id)}`, {
+        method: 'PATCH',
+        body: {
+          stage: $('#crm-stage').value,
+          ownerId: $('#crm-owner').value,
+          bid: $('#crm-bid').value.trim() || null,
+          nextStep: $('#crm-next').value,
+          nextStepAt: $('#crm-next-at').value,
+          lostReason: $('#crm-lost').value,
+        },
+      });
+      toast('Карточка сохранена', 'ok');
+      await Promise.all([loadCrm(), loadState()]);
+      fillCrmForm(crmState.deals.find((d) => d.id === saved.id) || saved);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+  $('#crm-note-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const deal = crmState.current;
+    const text = $('#crm-note').value.trim();
+    if (!deal || !text) return;
+    try {
+      await api(`/api/crm/${encodeURIComponent(deal.id)}/notes`, { method: 'POST', body: { text } });
+      $('#crm-note').value = '';
+      await loadCrm();
+      fillCrmForm(crmState.deals.find((d) => d.id === deal.id));
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+  $('#crm-delete').addEventListener('click', async () => {
+    const deal = crmState.current;
+    if (!deal || !confirm('Убрать закупку из воронки? Заметка в избранном останется.')) return;
+    try {
+      await api(`/api/crm/${encodeURIComponent(deal.id)}`, { method: 'DELETE' });
+      $('#modal-crm').hidden = true;
+      toast('Убрано из воронки', 'ok');
+      await Promise.all([loadCrm(), loadState(), loadFeed()]);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  // ---------- init ----------
+  (async () => {
+    try {
+      await loadState();
+      await loadFeed();
+      connectEvents();
+      const view = location.hash.replace('#', '');
+      if (['feed', 'favorites', 'news', 'crm', 'watchlist', 'analytics', 'settings', 'users', 'log'].includes(view)) showView(view);
+      else if (!state.watchlist.nomenclature.length) showView('watchlist');
+    } catch (err) {
+      toast(`Не удалось загрузить: ${err.message}`, 'err');
+    }
+  })();
+})();

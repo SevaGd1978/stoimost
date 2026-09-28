@@ -3,3 +3,8 @@ node_modules/
 *.log
 .vite/
 .cache/
+tender-spy/data/*.json
+tender-spy/data/*.tmp
+tender-spy/.env
+.env
+

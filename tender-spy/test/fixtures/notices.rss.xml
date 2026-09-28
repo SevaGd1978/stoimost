@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Результаты поиска закупок</title>
+    <link>https://zakupki.gov.ru/epz/order/extendedsearch/results.html</link>
+    <description>ЕИС в сфере закупок</description>
+    <item>
+      <title>№ 0172200002526000123 Электронный аукцион</title>
+      <link>https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber=0172200002526000123</link>
+      <description><![CDATA[<b>Наименование объекта закупки:</b> Поставка труб стальных предизолированных в ППУ изоляции для реконструкции тепловой сети<br/><b>Заказчик:</b> АКЦИОНЕРНОЕ ОБЩЕСТВО "ТЕПЛОСЕТЬ САНКТ-ПЕТЕРБУРГА" (ИНН 7810577007)<br/><b>Начальная цена контракта:</b> 12 345 678,90<br/><b>Валюта:</b> Российский рубль<br/><b>Размещено:</b> 20.09.2026<br/><b>Обновлено:</b> 21.09.2026 09:15<br/><b>Окончание подачи заявок:</b> 30.09.2026 10:00<br/><b>Этап закупки:</b> Подача заявок<br/>]]></description>
+      <pubDate>Sat, 20 Sep 2026 06:00:00 GMT</pubDate>
+      <guid>https://zakupki.gov.ru/epz/order/notice/ea20/view/common-info.html?regNumber=0172200002526000123</guid>
+    </item>
+    <item>
+      <title>№ 32615000123 Запрос предложений в электронной форме</title>
+      <link>https://zakupki.gov.ru/epz/order/notice/notice223/view/common-info.html?noticeInfoId=32615000123</link>
+      <description><![CDATA[<b>Наименование объекта закупки:</b> Выполнение работ по капитальному ремонту котельной<br/><b>Заказчик:</b> ГУП "ТЭК СПБ" (ИНН 7830001028)<br/><b>Начальная цена:</b> 98 000 000,00<br/><b>Размещено:</b> 18.09.2026<br/><b>Этап закупки:</b> Работа комиссии<br/>]]></description>
+      <pubDate>Thu, 18 Sep 2026 12:30:00 GMT</pubDate>
+      <guid>32615000123</guid>
+    </item>
+  </channel>
+</rss>
