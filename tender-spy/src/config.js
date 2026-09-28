@@ -45,4 +45,7 @@ export const config = {
   },
   /** Сколько дней хранить тендеры, которые больше не попадают в выборку */
   retentionDays: envInt('TENDER_SPY_RETENTION_DAYS', 90),
+  /** Пароль на весь сайт (HTTP Basic). Пусто — сайт открыт всем, у кого есть ссылка. */
+  password: process.env.TENDER_SPY_PASSWORD || '',
+  user: process.env.TENDER_SPY_USER || '',
 };

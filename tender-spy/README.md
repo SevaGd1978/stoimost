@@ -31,6 +31,7 @@ npm run demo         # демо-режим: карточки генерирую�
   2. Добавьте remote: `git remote add amvera https://git.amvera.ru/<username>/<app-name>`.
   3. Отправьте ветку: `git push amvera HEAD:master`.
   4. В панели Amvera задайте необходимые переменные (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TENDER_SPY_POLL_MIN`).
+  5. **Пароль на сайт:** задайте переменную `TENDER_SPY_PASSWORD` (и при желании `TENDER_SPY_USER`). Браузер спросит логин и пароль (HTTP Basic); без переменной сайт открыт всем, у кого есть ссылка. `/health` остаётся открытым для мониторинга.
 
 ## Как пользоваться
 

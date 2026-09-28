@@ -14,6 +14,7 @@ import { keywordMatches, parsePriceBound, priceInRange } from './src/tenders.js'
 import { createEisFetch, extraCaLabels } from './src/eis-tls.js';
 import { DocumentService, DocumentsError } from './src/documents/service.js';
 import { tools as documentTools } from './src/documents/convert.js';
+import { basicAuth } from './src/auth.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 import {
@@ -80,6 +81,7 @@ app.use(express.json({ limit: '3mb' }));
 
 // Health check для мониторинга облачных платформ (Amvera, k8s, docker)
 app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.use(basicAuth({ password: config.password, user: config.user, open: ['/health'] }));
 
 app.use(express.static(path.join(config.rootDir, 'public'), { extensions: ['html'] }));
 
