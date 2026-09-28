@@ -244,6 +244,10 @@ select.input { appearance: none; }
 .volume-note, .volume-sources { font-size: 12.5px; color: var(--muted); }
 .volume-sources { margin: 8px 0 0; padding-left: 18px; }
 .volume-modal .table { margin-top: 12px; }
+.news-card { display: block; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-2); margin-bottom: 8px; }
+.news-card a { font-weight: 650; text-decoration: none; }
+.news-meta { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.news-card p { margin: 6px 0 0; font-size: 13px; }
 .crm-log { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
 .crm-log div { font-size: 12.5px; color: var(--muted); }
 .crm-log b { color: var(--text); font-weight: 600; }

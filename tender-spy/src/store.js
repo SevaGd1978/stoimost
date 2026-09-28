@@ -51,6 +51,7 @@ function emptyDb() {
     users: [],
     sessions: [],
     deals: {},
+    news: null,
   };
 }
 
@@ -92,6 +93,7 @@ export class Store {
       this.db.users = Array.isArray(parsed.users) ? parsed.users : [];
       this.db.sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
       this.db.deals = parsed.deals && typeof parsed.deals === 'object' && !Array.isArray(parsed.deals) ? parsed.deals : {};
+      this.db.news = parsed.news && typeof parsed.news === 'object' && !Array.isArray(parsed.news) ? parsed.news : null;
       const sessionsBefore = this.db.sessions.length;
       this.purgeSessions();
       if (this.db.sessions.length !== sessionsBefore) this.scheduleSave();
@@ -525,6 +527,15 @@ export class Store {
   }
 
   // ---- runs & settings -------------------------------------------------
+
+  get news() {
+    return this.db.news || null;
+  }
+
+  setNews(report) {
+    this.db.news = report;
+    this.scheduleSave();
+  }
 
   addRun(run) {
     this.db.runs.unshift(run);

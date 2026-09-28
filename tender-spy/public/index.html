@@ -104,6 +104,7 @@
 
       <nav class="nav">
         <button class="nav-item active" data-view="feed">📡 Лента <span class="nav-badge" id="badge-unseen" hidden>0</span></button>
+        <button class="nav-item" data-view="news">🏗 Стройки</button>
         <button class="nav-item" data-view="favorites">⭐ Избранное <span class="nav-badge fav-badge" id="badge-fav" hidden>0</span></button>
         <button class="nav-item" data-view="crm">📋 Воронка <span class="nav-badge crm-badge" id="badge-crm" hidden>0</span></button>
         <button class="nav-item" data-view="watchlist">🎯 Наблюдение</button>
@@ -138,6 +139,22 @@
     </aside>
 
     <main class="main">
+      <section class="view" id="view-news" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Стройки и проекты</h1>
+            <p class="muted" id="news-summary">Новости о предстоящих стройках по номенклатуре</p>
+          </div>
+          <div class="head-actions">
+            <a class="btn btn-ghost" id="news-search" href="#" target="_blank" rel="noopener" hidden>Открыть ленту новостей</a>
+          </div>
+        </header>
+        <div class="card">
+          <p class="muted small">Раздел собирается по ключевым словам номенклатуры из «Наблюдения» и обновляется кнопкой «Опросить сейчас». Ищутся стройки, реконструкция и капитальный ремонт.</p>
+          <div id="news-list" class="mt-sm"></div>
+        </div>
+      </section>
+
       <!-- ЛЕНТА -->
       <section class="view" id="view-feed">
         <header class="view-head">

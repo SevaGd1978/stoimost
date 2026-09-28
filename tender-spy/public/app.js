@@ -63,6 +63,7 @@
     if (name === 'users') loadUsers().catch((e) => toast(e.message, 'err'));
     if (name === 'watchlist') loadQueries();
     if (name === 'analytics') loadAnalytics();
+    if (name === 'news') renderNews();
     if (name === 'log') loadRuns();
     location.hash = name;
   }
@@ -71,13 +72,50 @@
   // ---------- state ----------
   async function loadState() {
     const s = await api('/api/state');
-    Object.assign(state, { mode: s.mode, user: s.user, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun, facets: s.facets || {} });
+    Object.assign(state, { mode: s.mode, user: s.user, platforms: s.platforms || [], settings: s.settings, watchlist: s.watchlist, status: s.status, stats: s.stats, lastRun: s.lastRun, facets: s.facets || {}, news: s.news || null });
+    renderNews();
     renderStatus();
     renderWatchlist();
     renderSettings();
     applyRole();
     fillFilterSelects();
     if (isAdmin()) loadUsers().catch((e) => toast(e.message, 'err'));
+  }
+
+  function renderNews() {
+    const n = state.news;
+    const box = $('#news-list');
+    const link = $('#news-search');
+    if (!box) return;
+    if (n?.searchUrl) {
+      link.href = n.searchUrl;
+      link.hidden = false;
+    } else {
+      link.hidden = true;
+    }
+    if (!n?.updatedAt) {
+      $('#news-summary').textContent = 'Обновляется кнопкой «Опросить сейчас» по номенклатуре из «Наблюдения»';
+      box.innerHTML = '<p class="muted">Пока пусто. Добавьте ключевые слова номенклатуры и нажмите «Опросить сейчас».</p>';
+      return;
+    }
+    const words = (n.keywords || []).join(', ');
+    $('#news-summary').textContent = `Обновлено ${fmtDateTime(n.updatedAt)}${words ? ` · ${words}` : ''}`;
+    const cards = (n.items || [])
+      .map((item) => {
+        const title = item.url
+          ? `<a href="${esc(item.url)}" target="_blank" rel="noopener">${esc(item.title)}</a>`
+          : `<b>${esc(item.title)}</b>`;
+        return `<article class="news-card">
+          <div class="news-meta">${esc(item.source || 'Новости')}${item.publishedAt ? ` · ${fmtDate(item.publishedAt)}` : ''}</div>
+          <div>${title}</div>
+          ${item.summary ? `<p>${esc(item.summary)}</p>` : ''}
+        </article>`;
+      })
+      .join('');
+    box.innerHTML = `
+      ${n.warning ? `<p class="docs-error">${esc(n.warning)}</p>` : ''}
+      ${cards || '<p class="muted">По этим словам новостей о стройках не нашлось.</p>'}
+      ${n.note ? `<p class="news-meta">${esc(n.note)}</p>` : ''}`;
   }
 
   function applyRole() {
@@ -968,10 +1006,12 @@
     $('#btn-scan').disabled = true;
     $('#scan-progress').hidden = false;
     try {
-      const { run } = await api('/api/scan', { method: 'POST' });
+      const { run, news } = await api('/api/scan', { method: 'POST' });
+      if (news) state.news = news;
+      renderNews();
       if (run.skipped) toast('Опрос уже идёт', '');
       else if (run.errors?.length && !run.found) toast(`Опрос завершён с ошибками: ${run.errors[0].message}`, 'err');
-      else toast(`Найдено ${run.found}, новых ${run.added}`, run.added ? 'ok' : '');
+      else toast(`Найдено ${run.found}, новых ${run.added}. Новостей о стройках: ${news?.items?.length || 0}`, run.added || news?.items?.length ? 'ok' : '');
     } catch (err) {
       toast(err.message, 'err');
     } finally {
@@ -1220,7 +1260,7 @@
       await loadFeed();
       connectEvents();
       const view = location.hash.replace('#', '');
-      if (['feed', 'favorites', 'crm', 'watchlist', 'analytics', 'settings', 'users', 'log'].includes(view)) showView(view);
+      if (['feed', 'favorites', 'news', 'crm', 'watchlist', 'analytics', 'settings', 'users', 'log'].includes(view)) showView(view);
       else if (!state.watchlist.nomenclature.length) showView('watchlist');
     } catch (err) {
       toast(`Не удалось загрузить: ${err.message}`, 'err');

@@ -20,11 +20,12 @@ function priceAllowed(price, { priceMin = null, priceMax = null } = {}) {
  * Планировщик запускает опросы по таймеру и по запросу из UI.
  */
 export class Scheduler extends EventEmitter {
-  constructor({ store, source, notifier, retentionDays = 90, cardsPerRun = 40, cardDelayMs = 1500, log = console }) {
+  constructor({ store, source, notifier, retentionDays = 90, cardsPerRun = 40, cardDelayMs = 1500, collectNews = null, log = console }) {
     super();
     this.store = store;
     this.source = source;
     this.notifier = notifier;
+    this.collectNews = collectNews;
     this.retentionDays = retentionDays;
     this.cardsPerRun = cardsPerRun;
     this.cardDelayMs = cardDelayMs;
@@ -87,12 +88,14 @@ export class Scheduler extends EventEmitter {
       };
       this.lastRun = run;
       this.store.addRun(run);
+      if (trigger === 'manual') await this.refreshNews(nomenclature);
       this.schedule();
       return run;
     }
 
     this.running = true;
     this.emit('run:start', { trigger });
+    const newsTask = trigger === 'manual' ? this.refreshNews(nomenclature) : null;
     const startedAt = new Date().toISOString();
     let result = { tenders: [], errors: [], queriesRun: 0 };
     try {
@@ -127,6 +130,7 @@ export class Scheduler extends EventEmitter {
       pruned,
       errors: result.errors,
     };
+    if (newsTask) await newsTask;
     this.lastRun = run;
     this.store.addRun(run);
     this.running = false;
@@ -142,6 +146,25 @@ export class Scheduler extends EventEmitter {
       .then(() => this.checkReminders())
       .catch((err) => this.log.warn('[cards]', err.message));
     return run;
+  }
+
+  /** Новости о стройках по номенклатуре. Только ручной опрос. Сбой не стирает прошлую ленту. */
+  async refreshNews(nomenclature) {
+    if (!this.collectNews) return null;
+    let fresh;
+    try {
+      fresh = await this.collectNews(nomenclature);
+    } catch (err) {
+      fresh = { updatedAt: new Date().toISOString(), keywords: [], items: [], searchUrl: '', note: '', warning: err.message || 'ошибка' };
+    }
+    const prev = this.store.news;
+    if (fresh.warning && !fresh.items?.length && prev?.items?.length) {
+      this.store.setNews({ ...prev, warning: fresh.warning });
+    } else {
+      this.store.setNews(fresh);
+    }
+    this.log.info?.(`[news] ${this.store.news?.items?.length || 0}${fresh.warning ? ` — ${fresh.warning}` : ''}`);
+    return this.store.news;
   }
 
   /** Напоминания о скором окончании подачи по избранным: событие для браузера и Telegram. */

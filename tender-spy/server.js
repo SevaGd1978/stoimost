@@ -19,6 +19,7 @@ import { mountAuthRoutes } from './src/auth-routes.js';
 import { ensureBootstrapAdmin, publicUser, tenderPatchFor } from './src/accounts.js';
 import { CRM_STAGES, CrmError, isOpenStage, presentDeal } from './src/crm.js';
 import { legalCheckUrl } from './src/legal-check.js';
+import { collectProjectNews } from './src/news.js';
 import { collectCustomerVolume } from './src/procurement.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
@@ -91,7 +92,14 @@ const volumeSource =
       });
 
 const notifier = new TelegramNotifier({ token: config.telegram.token, chatId: config.telegram.chatId, log });
-const scheduler = new Scheduler({ store, source, notifier, retentionDays: config.retentionDays, log });
+const scheduler = new Scheduler({
+  store,
+  source,
+  notifier,
+  retentionDays: config.retentionDays,
+  collectNews: (nomenclature) => collectProjectNews({ keywords: nomenclature, mode: config.mode }),
+  log,
+});
 const documents = new DocumentService({
   store,
   fetchImpl: createEisFetch({ timeoutMs: 180_000 }),
@@ -236,6 +244,7 @@ app.get('/api/state', (req, res) => {
     stats: stats(),
     analytics: analytics(),
     lastRun: store.runs[0] ?? null,
+    news: store.news,
     facets: facets(),
     documentTools: documentTools(),
   });
@@ -638,7 +647,11 @@ app.post('/api/telegram/test', auth.requireAdmin, async (_req, res) => {
 app.post('/api/scan', auth.requireAdmin, async (_req, res) => {
   if (scheduler.running) return res.status(409).json({ error: 'Опрос уже выполняется' });
   const run = await scheduler.runOnce({ trigger: 'manual' });
-  res.json({ run, stats: stats() });
+  res.json({ run, stats: stats(), news: store.news });
+});
+
+app.get('/api/news', (_req, res) => {
+  res.json(store.news || { updatedAt: null, keywords: [], items: [], searchUrl: '', note: '', warning: '' });
 });
 
 app.get('/api/runs', (_req, res) => res.json(store.runs));
