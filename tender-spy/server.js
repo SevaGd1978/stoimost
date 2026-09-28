@@ -16,7 +16,8 @@ import { DocumentService, DocumentsError } from './src/documents/service.js';
 import { tools as documentTools } from './src/documents/convert.js';
 import { createAuth } from './src/auth.js';
 import { mountAuthRoutes } from './src/auth-routes.js';
-import { ensureBootstrapAdmin, tenderPatchFor } from './src/accounts.js';
+import { ensureBootstrapAdmin, publicUser, tenderPatchFor } from './src/accounts.js';
+import { CRM_STAGES, CrmError, isOpenStage, presentDeal } from './src/crm.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 import {
@@ -139,6 +140,7 @@ function stats() {
     open: all.filter((t) => t.kind === 'notice' && t.isOpen && !t.archived).length,
     contracts: all.filter((t) => t.kind === 'contract').length,
     favorites: all.filter((t) => t.favorite).length,
+    crm: Object.values(store.deals).filter((d) => isOpenStage(d.stage)).length,
   };
 }
 
@@ -314,10 +316,15 @@ function filterTenders(query) {
   return list;
 }
 
+function withCrm(t) {
+  const stage = store.deals[t.id]?.stage;
+  return stage ? { ...t, crmStage: stage } : t;
+}
+
 app.get('/api/tenders', (req, res) => {
   const list = filterTenders(req.query);
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
-  res.json({ total: list.length, items: list.slice(0, limit) });
+  res.json({ total: list.length, items: list.slice(0, limit).map(withCrm) });
 });
 
 app.get('/api/tenders.csv', (req, res) => {
@@ -325,7 +332,8 @@ app.get('/api/tenders.csv', (req, res) => {
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const names = Object.fromEntries([['zakupki', 'ЕИС'], ...PLATFORMS.map((p) => [p.id, p.name])]);
   const sourcesOf = (t) => Object.keys(t.links && Object.keys(t.links).length ? t.links : { [t.source || 'zakupki']: 1 }).map((id) => names[id] || id).join(', ');
-  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Регион', 'Поставщик', 'Цена', 'Этап', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Заметка', 'Ссылка'];
+  const stageName = Object.fromEntries(CRM_STAGES.map((s) => [s.id, s.label]));
+  const header = ['Тип', 'Закон', 'Номер', 'Наименование', 'Заказчик', 'Регион', 'Поставщик', 'Цена', 'Этап', 'Воронка', 'Размещено', 'Окончание подачи', 'Причина', 'Источник', 'Заметка', 'Ссылка'];
   const rows = list.map((t) =>
     [
       t.kind === 'contract' ? 'Контракт' : 'Извещение',
@@ -337,6 +345,7 @@ app.get('/api/tenders.csv', (req, res) => {
       t.supplier,
       t.price ?? '',
       t.stage,
+      stageName[store.deals[t.id]?.stage] || '',
       t.publishedAt ? t.publishedAt.slice(0, 10) : '',
       t.deadlineAt ? t.deadlineAt.slice(0, 10) : '',
       t.matches.map((m) => (m.type === 'company' ? `ИНН ${m.ref} ${m.label}` : m.label)).join('; '),
@@ -350,6 +359,61 @@ app.get('/api/tenders.csv', (req, res) => {
   res.set('Content-Type', 'text/csv; charset=utf-8');
   res.set('Content-Disposition', `attachment; filename="tenders-${new Date().toISOString().slice(0, 10)}.csv"`);
   res.send('\uFEFF' + [header.map(esc).join(';'), ...rows].join('\r\n'));
+});
+
+function sendCrm(res, deal, extra = {}) {
+  res.json({ ...presentDeal(deal, { tender: store.tenders[deal.id], owner: store.userById(deal.ownerId) }), ...extra });
+}
+
+function crmFail(res, err) {
+  const status = err instanceof CrmError ? err.status || 400 : 500;
+  res.status(status).json({ error: err.message || 'Ошибка' });
+}
+
+app.get('/api/crm', (_req, res) => {
+  const deals = Object.values(store.deals)
+    .map((deal) => presentDeal(deal, { tender: store.tenders[deal.id], owner: store.userById(deal.ownerId) }))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  res.json({
+    stages: CRM_STAGES,
+    users: store.users.filter((u) => !u.disabled).map(publicUser),
+    deals,
+  });
+});
+
+app.post('/api/crm', (req, res) => {
+  try {
+    const { deal, created } = store.openDeal(String(req.body?.tenderId || ''), req.user);
+    const body = presentDeal(deal, { tender: store.tenders[deal.id], owner: store.userById(deal.ownerId) });
+    res.status(created ? 201 : 200).json({ ...body, created });
+  } catch (err) {
+    crmFail(res, err);
+  }
+});
+
+app.patch('/api/crm/:id', (req, res) => {
+  try {
+    const deal = store.updateDeal(req.params.id, req.body ?? {}, req.user);
+    if (!deal) return res.status(404).json({ error: 'Карточки в воронке нет' });
+    sendCrm(res, deal);
+  } catch (err) {
+    crmFail(res, err);
+  }
+});
+
+app.post('/api/crm/:id/notes', (req, res) => {
+  try {
+    const deal = store.addDealNote(req.params.id, req.body?.text, req.user);
+    if (!deal) return res.status(404).json({ error: 'Карточки в воронке нет' });
+    sendCrm(res, deal);
+  } catch (err) {
+    crmFail(res, err);
+  }
+});
+
+app.delete('/api/crm/:id', auth.requireAdmin, (req, res) => {
+  if (!store.removeDeal(req.params.id)) return res.status(404).json({ error: 'Карточки в воронке нет' });
+  res.json({ ok: true });
 });
 
 app.patch('/api/tenders/:id', (req, res) => {

@@ -236,6 +236,22 @@ select.input { appearance: none; }
 #set-minus { width: 100%; resize: vertical; font-family: inherit; }
 
 .nav-badge.fav-badge { background: var(--gold); color: #2a1f00; }
+.nav-badge.crm-badge { background: var(--accent-2); color: #042033; }
+.crm-modal { max-width: 720px; }
+.crm-log { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow: auto; }
+.crm-log div { font-size: 12.5px; color: var(--muted); }
+.crm-log b { color: var(--text); font-weight: 600; }
+.kanban { display: flex; gap: 12px; overflow-x: auto; align-items: flex-start; padding-bottom: 8px; }
+.kanban-col { flex: 0 0 250px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; min-height: 180px; }
+.kanban-col.dragover { border-color: var(--accent); }
+.kanban-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+.kanban-head span { color: var(--muted); font-weight: 600; }
+.kanban-col.closed { opacity: 0.85; }
+.crm-card { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 8px; cursor: grab; }
+.crm-card:active { cursor: grabbing; }
+.crm-card .title { font-weight: 650; font-size: 13px; line-height: 1.35; }
+.crm-card .meta { margin-top: 4px; color: var(--muted); font-size: 12px; }
+.crm-card .next { margin-top: 6px; font-size: 12px; color: var(--accent-2); }
 .tender-actions .fav { white-space: nowrap; }
 .tender-actions .fav.active { border-color: rgba(255, 209, 102, 0.5); }
 .tender-note { margin-top: 8px; position: relative; }

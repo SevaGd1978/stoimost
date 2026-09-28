@@ -10,6 +10,55 @@
 <body>
   <div class="toast-stack" id="toasts"></div>
 
+  <div class="modal-backdrop" id="modal-crm" hidden>
+    <div class="modal-box crm-modal">
+      <div class="card-title" id="crm-title">Закупка</div>
+      <p class="muted small" id="crm-sub"></p>
+      <div class="form-row">
+        <div class="field grow">
+          <label>Этап</label>
+          <select class="input" id="crm-stage"></select>
+        </div>
+        <div class="field grow">
+          <label>Ответственный</label>
+          <select class="input" id="crm-owner"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field grow">
+          <label>Наше предложение, ₽</label>
+          <input class="input" id="crm-bid" inputmode="decimal" placeholder="как НМЦК, если не заполнено" />
+        </div>
+        <div class="field grow">
+          <label>Следующий шаг</label>
+          <input class="input" id="crm-next" maxlength="300" placeholder="запросить КП, сверить ТЗ…" />
+        </div>
+        <div class="field">
+          <label>Когда</label>
+          <input class="input" id="crm-next-at" type="date" />
+        </div>
+      </div>
+      <div class="field" id="crm-lost-row" hidden>
+        <label>Почему отказ</label>
+        <input class="input" id="crm-lost" maxlength="300" placeholder="не наш регион, цена, срок" />
+      </div>
+      <div class="form-row mt-sm">
+        <button class="btn btn-primary" id="crm-save" type="button">Сохранить</button>
+        <a class="btn btn-ghost" id="crm-link" href="#" target="_blank" rel="noopener">Открыть закупку</a>
+        <button class="btn btn-ghost admin-only" id="crm-delete" type="button">Убрать из воронки</button>
+      </div>
+      <div class="card-title mt">Комментарии</div>
+      <div class="crm-log" id="crm-log"></div>
+      <form class="form-row mt-sm" id="crm-note-form">
+        <input class="input" id="crm-note" maxlength="1000" placeholder="Что сделали, с кем говорили…" />
+        <button class="btn btn-primary" type="submit">Добавить</button>
+      </form>
+      <div class="form-row mt-sm">
+        <button class="btn btn-ghost" id="crm-close" type="button">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Модальное окно импорта Watchlist -->
   <div class="modal-backdrop" id="modal-import" hidden>
     <div class="modal-box">
@@ -44,6 +93,7 @@
       <nav class="nav">
         <button class="nav-item active" data-view="feed">📡 Лента <span class="nav-badge" id="badge-unseen" hidden>0</span></button>
         <button class="nav-item" data-view="favorites">⭐ Избранное <span class="nav-badge fav-badge" id="badge-fav" hidden>0</span></button>
+        <button class="nav-item" data-view="crm">📋 Воронка <span class="nav-badge crm-badge" id="badge-crm" hidden>0</span></button>
         <button class="nav-item" data-view="watchlist">🎯 Наблюдение</button>
         <button class="nav-item" data-view="analytics">📊 Аналитика</button>
         <button class="nav-item" data-view="settings">⚙️ Настройки</button>
@@ -180,6 +230,25 @@
           <div class="empty-icon">⭐</div>
           <h3>В избранном пока пусто</h3>
           <p>В ленте нажмите «☆ В избранное» на карточке закупки — она появится здесь вместе с полем для заметок.</p>
+        </div>
+      </section>
+
+      <!-- ВОРОНКА -->
+      <section class="view" id="view-crm" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Воронка участия</h1>
+            <p class="muted">Закупки, которые команда ведёт до заявки: отбор, изучение, подготовка, подача, итог</p>
+          </div>
+          <div class="head-actions">
+            <label class="chip"><input type="checkbox" id="crm-mine" /> только мои</label>
+          </div>
+        </header>
+        <div class="kanban" id="crm-board"></div>
+        <div class="empty" id="crm-empty" hidden>
+          <div class="empty-icon">📋</div>
+          <h3>В воронке пока пусто</h3>
+          <p>В ленте или в избранном нажмите «В воронку» на закупке, которую решили рассматривать.</p>
         </div>
       </section>
 

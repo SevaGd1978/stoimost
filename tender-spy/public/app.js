@@ -58,6 +58,7 @@
     $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     if (name === 'favorites') loadFavorites().catch((e) => toast(e.message, 'err'));
+    if (name === 'crm') loadCrm().catch((e) => toast(e.message, 'err'));
     if (name === 'watchlist') loadQueries();
     if (name === 'analytics') loadAnalytics();
     if (name === 'log') loadRuns();
@@ -105,6 +106,9 @@
     const favBadge = $('#badge-fav');
     favBadge.hidden = !(stats?.favorites > 0);
     favBadge.textContent = stats?.favorites ?? 0;
+    const crmBadge = $('#badge-crm');
+    crmBadge.hidden = !(stats?.crm > 0);
+    crmBadge.textContent = stats?.crm ?? 0;
     const badge = $('#badge-unseen');
     badge.hidden = !(stats?.unseen > 0);
     badge.textContent = stats?.unseen ?? 0;
@@ -215,6 +219,7 @@
           <div class="price">${fmtPrice(t.price)} <small>₽</small></div>
           <div class="deadline ${dlClass}">${esc(dlText)}</div>
           <div class="tender-actions">
+            <button class="btn btn-sm" data-act="crm" title="Вести закупку в воронке участия">${t.crmStage ? '📋 В воронке' : '📋 В воронку'}</button>
             <button class="btn btn-sm fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="${t.favorite ? 'Убрать из избранного' : 'Отложить для дальнейшего рассмотрения'}">${t.favorite ? '★ В избранном' : '☆ В избранное'}</button>
             <button class="btn btn-sm btn-icon" data-act="seen" title="${t.seen ? 'Отметить как новое' : 'Прочитано'}">${t.seen ? '↺' : '✓'}</button>
             ${isAdmin() ? `<button class="btn btn-sm btn-icon" data-act="archive" title="${t.archived ? 'Вернуть из архива' : 'В архив'}">${t.archived ? '📤' : '🗄️'}</button>` : ''}
@@ -291,6 +296,7 @@
       if (!t) return;
       if (btn.dataset.act === 'docs') return extractDocs(t);
       if (btn.dataset.act === 'docs-list') return toggleDocsList(t, btn);
+      if (btn.dataset.act === 'crm') return openInCrm(t);
       const patch =
         btn.dataset.act === 'favorite' ? { favorite: !t.favorite } : btn.dataset.act === 'seen' ? { seen: !t.seen } : { archived: !t.archived, seen: true };
       try {
@@ -932,6 +938,179 @@
     };
   }
 
+  // ---------- воронка ----------
+  const crmState = { stages: [], users: [], deals: [], current: null };
+  let crmDrag = false;
+
+  async function openInCrm(t) {
+    try {
+      const deal = await api('/api/crm', { method: 'POST', body: { tenderId: t.id } });
+      toast(deal.created ? 'Закупка в воронке' : 'Уже в воронке', 'ok');
+      t.crmStage = deal.stage;
+      showView('crm');
+      openCrmModal(deal);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  }
+
+  async function loadCrm() {
+    const data = await api('/api/crm');
+    crmState.stages = data.stages || [];
+    crmState.users = data.users || [];
+    crmState.deals = data.deals || [];
+    renderCrm();
+  }
+
+  function renderCrm() {
+    const mine = $('#crm-mine').checked;
+    const deals = crmState.deals.filter((d) => !mine || d.ownerId === state.user?.id);
+    $('#crm-empty').hidden = crmState.deals.length > 0;
+    $('#crm-board').hidden = crmState.deals.length === 0;
+    $('#crm-board').innerHTML = crmState.stages
+      .map((stage) => {
+        const items = deals.filter((d) => d.stage === stage.id);
+        const sum = items.reduce((acc, d) => acc + (typeof d.card.price === 'number' ? d.card.price : 0), 0);
+        return `<section class="kanban-col ${stage.id === 'won' || stage.id === 'lost' ? 'closed' : ''}" data-stage="${esc(stage.id)}">
+          <div class="kanban-head">${esc(stage.label)} <span>${items.length}${sum ? ` · ${fmtPrice(sum)} ₽` : ''}</span></div>
+          ${items.map(crmCard).join('') || '<div class="muted small">Пусто</div>'}
+        </section>`;
+      })
+      .join('');
+  }
+
+  function crmCard(d) {
+    const left = daysLeft(d.card.deadlineAt);
+    const when = d.nextStepAt ? `до ${fmtDate(d.nextStepAt)}` : '';
+    return `<article class="crm-card" draggable="true" data-id="${esc(d.id)}">
+      <div class="title">${esc(d.card.title || d.card.number || d.id)}</div>
+      <div class="meta">${esc(d.card.customer || 'Заказчик не указан')}${d.card.price != null ? ` · ${fmtPrice(d.card.price)} ₽` : ''}</div>
+      <div class="meta">${d.ownerName ? esc(d.ownerName) : 'без ответственного'}${left != null && left >= 0 ? ` · подача ${left} дн.` : ''}</div>
+      ${d.nextStep ? `<div class="next">${esc(d.nextStep)}${when ? ` · ${esc(when)}` : ''}</div>` : ''}
+    </article>`;
+  }
+
+  function fillCrmForm(deal) {
+    crmState.current = deal;
+    $('#crm-title').textContent = deal.card.title || 'Закупка';
+    const bits = [deal.card.customer, deal.card.number ? `№ ${deal.card.number}` : '', deal.card.region].filter(Boolean);
+    $('#crm-sub').textContent = bits.join(' · ');
+    $('#crm-stage').innerHTML = crmState.stages.map((s) => `<option value="${esc(s.id)}">${esc(s.label)}</option>`).join('');
+    $('#crm-stage').value = deal.stage;
+    $('#crm-owner').innerHTML = '<option value="">Не назначен</option>' + crmState.users.map((u) => `<option value="${esc(u.id)}">${esc(u.name || u.login)}</option>`).join('');
+    $('#crm-owner').value = crmState.users.some((u) => u.id === deal.ownerId) ? deal.ownerId : '';
+    $('#crm-bid').value = deal.bid != null ? fmtPrice(deal.bid) : '';
+    $('#crm-next').value = deal.nextStep || '';
+    $('#crm-next-at').value = deal.nextStepAt || '';
+    $('#crm-lost').value = deal.lostReason || '';
+    $('#crm-lost-row').hidden = deal.stage !== 'lost';
+    $('#crm-link').href = deal.card.url || '#';
+    $('#crm-log').innerHTML = (deal.activities || [])
+      .slice()
+      .reverse()
+      .map((a) => `<div><b>${esc(a.name)}</b> · ${fmtDateTime(a.at)}<br>${esc(a.text)}</div>`)
+      .join('') || '<div>Комментариев пока нет</div>';
+    $('#modal-crm').hidden = false;
+  }
+
+  async function openCrmModal(deal) {
+    if (!crmState.stages.length) await loadCrm();
+    const fresh = crmState.deals.find((d) => d.id === deal.id) || deal;
+    fillCrmForm(fresh);
+  }
+
+  $('#crm-board').addEventListener('click', (e) => {
+    const card = e.target.closest('.crm-card');
+    if (!card || crmDrag) return;
+    const deal = crmState.deals.find((d) => d.id === card.dataset.id);
+    if (deal) fillCrmForm(deal);
+  });
+  $('#crm-board').addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.crm-card');
+    if (!card) return;
+    crmDrag = true;
+    e.dataTransfer.setData('text/plain', card.dataset.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  $('#crm-board').addEventListener('dragend', () => setTimeout(() => { crmDrag = false; }, 80));
+  $('#crm-board').addEventListener('dragover', (e) => {
+    const col = e.target.closest('.kanban-col');
+    if (!col) return;
+    e.preventDefault();
+    $$('.kanban-col').forEach((c) => c.classList.toggle('dragover', c === col));
+  });
+  $('#crm-board').addEventListener('dragleave', (e) => {
+    if (!e.target.closest('.kanban-col')) return;
+    e.target.closest('.kanban-col').classList.remove('dragover');
+  });
+  $('#crm-board').addEventListener('drop', async (e) => {
+    const col = e.target.closest('.kanban-col');
+    if (!col) return;
+    e.preventDefault();
+    $$('.kanban-col').forEach((c) => c.classList.remove('dragover'));
+    const id = e.dataTransfer.getData('text/plain');
+    if (!id || crmState.deals.find((d) => d.id === id)?.stage === col.dataset.stage) return;
+    try {
+      await api(`/api/crm/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stage: col.dataset.stage } });
+      await Promise.all([loadCrm(), loadState()]);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+  $('#crm-mine').addEventListener('change', () => renderCrm());
+  $('#crm-stage').addEventListener('change', () => {
+    $('#crm-lost-row').hidden = $('#crm-stage').value !== 'lost';
+  });
+  $('#crm-close').addEventListener('click', () => { $('#modal-crm').hidden = true; });
+  $('#crm-save').addEventListener('click', async () => {
+    const deal = crmState.current;
+    if (!deal) return;
+    try {
+      const saved = await api(`/api/crm/${encodeURIComponent(deal.id)}`, {
+        method: 'PATCH',
+        body: {
+          stage: $('#crm-stage').value,
+          ownerId: $('#crm-owner').value,
+          bid: $('#crm-bid').value.trim() || null,
+          nextStep: $('#crm-next').value,
+          nextStepAt: $('#crm-next-at').value,
+          lostReason: $('#crm-lost').value,
+        },
+      });
+      toast('Карточка сохранена', 'ok');
+      await Promise.all([loadCrm(), loadState()]);
+      fillCrmForm(crmState.deals.find((d) => d.id === saved.id) || saved);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+  $('#crm-note-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const deal = crmState.current;
+    const text = $('#crm-note').value.trim();
+    if (!deal || !text) return;
+    try {
+      await api(`/api/crm/${encodeURIComponent(deal.id)}/notes`, { method: 'POST', body: { text } });
+      $('#crm-note').value = '';
+      await loadCrm();
+      fillCrmForm(crmState.deals.find((d) => d.id === deal.id));
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+  $('#crm-delete').addEventListener('click', async () => {
+    const deal = crmState.current;
+    if (!deal || !confirm('Убрать закупку из воронки? Заметка в избранном останется.')) return;
+    try {
+      await api(`/api/crm/${encodeURIComponent(deal.id)}`, { method: 'DELETE' });
+      $('#modal-crm').hidden = true;
+      toast('Убрано из воронки', 'ok');
+      await Promise.all([loadCrm(), loadState(), loadFeed()]);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
   // ---------- init ----------
   (async () => {
     try {
@@ -939,7 +1118,7 @@
       await loadFeed();
       connectEvents();
       const view = location.hash.replace('#', '');
-      if (['feed', 'favorites', 'watchlist', 'analytics', 'settings', 'log'].includes(view)) showView(view);
+      if (['feed', 'favorites', 'crm', 'watchlist', 'analytics', 'settings', 'log'].includes(view)) showView(view);
       else if (!state.watchlist.nomenclature.length) showView('watchlist');
     } catch (err) {
       toast(`Не удалось загрузить: ${err.message}`, 'err');

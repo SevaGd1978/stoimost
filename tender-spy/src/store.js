@@ -5,6 +5,7 @@ import { findEisTwin, findPlatformTwins, parsePriceBound, staleNotice } from './
 import { PLATFORM_IDS } from './sources/platforms/index.js';
 import { DEFAULT_MINUS_WORDS, parseWordList } from './filters.js';
 import { regionFromText } from './regions.js';
+import { CrmError, createDeal, isOpenStage, patchDeal, pushActivity, tenderSnapshot } from './crm.js';
 import {
   AccountError,
   ROLES,
@@ -49,6 +50,7 @@ function emptyDb() {
     settings: defaultSettings(),
     users: [],
     sessions: [],
+    deals: {},
   };
 }
 
@@ -89,6 +91,7 @@ export class Store {
       };
       this.db.users = Array.isArray(parsed.users) ? parsed.users : [];
       this.db.sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+      this.db.deals = parsed.deals && typeof parsed.deals === 'object' && !Array.isArray(parsed.deals) ? parsed.deals : {};
       const sessionsBefore = this.db.sessions.length;
       this.purgeSessions();
       if (this.db.sessions.length !== sessionsBefore) this.scheduleSave();
@@ -390,6 +393,7 @@ export class Store {
       eis.customer ||= p.customer;
       eis.price ??= p.price;
       eis.deadlineAt ||= p.deadlineAt;
+      this.rekeyDeal(p.id, eis.id);
       delete this.tenders[p.id];
     }
     return twins.length;
@@ -510,7 +514,9 @@ export class Store {
     const cutoff = Date.now() - retentionDays * 86400_000;
     let removed = 0;
     for (const [id, t] of Object.entries(this.tenders)) {
-      if (!t.favorite && Date.parse(t.lastSeenAt) < cutoff) {
+      const deal = this.db.deals[id];
+      if (t.favorite || (deal && isOpenStage(deal.stage))) continue;
+      if (Date.parse(t.lastSeenAt) < cutoff) {
         delete this.tenders[id];
         removed++;
       }
@@ -656,5 +662,67 @@ export class Store {
     const user = this.userById(session.userId);
     if (!user || user.disabled) return null;
     return user;
+  }
+
+  // ---- воронка CRM -----------------------------------------------------
+
+  get deals() {
+    return this.db.deals;
+  }
+
+  rekeyDeal(fromId, toId) {
+    const from = this.db.deals[fromId];
+    if (!from || fromId === toId) return;
+    if (!this.db.deals[toId]) {
+      from.id = toId;
+      this.db.deals[toId] = from;
+    }
+    delete this.db.deals[fromId];
+  }
+
+  openDeal(tenderId, actor) {
+    const tender = this.tenders[tenderId];
+    if (!tender) throw new CrmError('Закупка не найдена', 404);
+    const existing = this.db.deals[tenderId];
+    if (existing) {
+      existing.snapshot = tenderSnapshot(tender);
+      return { deal: existing, created: false };
+    }
+    const deal = createDeal(tender, actor);
+    this.db.deals[tenderId] = deal;
+    if (!tender.favorite) {
+      tender.favorite = true;
+      tender.favoritedAt = deal.createdAt;
+    }
+    this.save();
+    return { deal, created: true };
+  }
+
+  updateDeal(id, patch, actor) {
+    const deal = this.db.deals[id];
+    if (!deal) return null;
+    patchDeal(deal, patch, { users: this.users, actor });
+    const tender = this.tenders[id];
+    if (tender) deal.snapshot = tenderSnapshot(tender);
+    this.save();
+    return deal;
+  }
+
+  addDealNote(id, text, actor) {
+    const deal = this.db.deals[id];
+    if (!deal) return null;
+    const note = String(text ?? '').trim();
+    if (!note) throw new CrmError('Напишите комментарий');
+    pushActivity(deal, actor, note.slice(0, 1000));
+    deal.updatedAt = new Date().toISOString();
+    this.save();
+    return deal;
+  }
+
+  removeDeal(id) {
+    if (!this.db.deals[id]) return false;
+    delete this.db.deals[id];
+    this.save();
+    return true;
   }
 }
