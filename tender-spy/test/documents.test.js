@@ -284,3 +284,21 @@ test('DocumentService: неудачное обновление не стирае
   await waitDone(svc, id);
   assert.equal(tenders[id].documents.lastError, undefined, 'успешное обновление убирает старую ошибку');
 });
+
+test('DocumentService.cleanup: удаляет документы исчезнувших и давно не избранных закупок', () => {
+  const dataDir = tmpDir();
+  const day = 86_400_000;
+  const now = Date.parse('2026-10-01T00:00:00Z');
+  const tenders = {
+    'notice:1': { id: 'notice:1', favorite: true, documents: { state: 'done', at: '2026-01-01T00:00:00Z' } },
+    'notice:2': { id: 'notice:2', favorite: false, documents: { state: 'done', at: new Date(now - 40 * day).toISOString() } },
+    'notice:3': { id: 'notice:3', favorite: false, documents: { state: 'done', at: new Date(now - 5 * day).toISOString() } },
+  };
+  const store = { tenders, scheduleSave() {} };
+  const svc = new DocumentService({ store, fetchImpl: async () => null, dataDir });
+  for (const name of ['notice_1', 'notice_2', 'notice_3', 'notice_gone', 'notice_1.building']) fs.mkdirSync(path.join(dataDir, 'documents', name), { recursive: true });
+  assert.equal(svc.cleanup({ now }), 3);
+  assert.deepEqual(fs.readdirSync(path.join(dataDir, 'documents')).sort(), ['notice_1', 'notice_3']);
+  assert.equal(tenders['notice:2'].documents, undefined);
+  assert.ok(tenders['notice:1'].documents, 'избранное хранится сколько угодно');
+});

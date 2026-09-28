@@ -140,6 +140,36 @@ export class DocumentService {
     }
   }
 
+  /**
+   * Удаляет документы закупок, которых нет в базе или которые не в избранном дольше
+   * keepDays, и недостроенные папки после сбоя. Возвращает число удалённых папок.
+   */
+  cleanup({ keepDays = 30, now = Date.now() } = {}) {
+    let names;
+    try {
+      names = fs.readdirSync(this.root);
+    } catch {
+      return 0;
+    }
+    const byDir = new Map(Object.values(this.store.tenders).map((t) => [safeId(t.id), t]));
+    const busy = new Set([...this.jobs.keys()].map(safeId));
+    let removed = 0;
+    for (const name of names) {
+      const base = name.replace(/\.building$/, '');
+      if (busy.has(base)) continue;
+      const t = byDir.get(base);
+      const stale = name.endsWith('.building') || !t || (!t.favorite && now - Date.parse(t.documents?.at ?? 0) > keepDays * 86_400_000);
+      if (!stale) continue;
+      fs.rmSync(path.join(this.root, name), { recursive: true, force: true });
+      if (t && !name.endsWith('.building')) {
+        delete t.documents;
+        this.store.scheduleSave();
+      }
+      removed++;
+    }
+    return removed;
+  }
+
   onUpdate(fn) {
     this.listeners.add(fn);
   }

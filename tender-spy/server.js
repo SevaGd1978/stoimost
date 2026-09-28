@@ -94,6 +94,8 @@ function broadcast(event, data) {
 scheduler.on('run:start', (d) => broadcast('run:start', d));
 scheduler.on('run:done', ({ run, added }) => broadcast('run:done', { run, added: added.map(brief) }));
 scheduler.on('cards:done', (d) => broadcast('cards:done', d));
+scheduler.on('run:done', () => documents.cleanup());
+documents.cleanup();
 documents.onUpdate((job) => broadcast('documents', { tenderId: job.tenderId, state: job.state, step: job.step, pages: job.pages, error: job.error }));
 
 function brief(t) {
