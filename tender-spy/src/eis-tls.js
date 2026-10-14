@@ -103,12 +103,17 @@ function lookupIpv4(hostname, options, callback) {
   });
 }
 
+const MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
+
 function decodeBody(headers, buf) {
   const enc = String(headers['content-encoding'] || '').toLowerCase();
-  if (enc.includes('gzip')) return zlib.gunzipSync(buf);
-  if (enc.includes('deflate')) return zlib.inflateSync(buf);
-  if (enc.includes('br')) return zlib.brotliDecompressSync(buf);
-  return buf;
+  let decoded;
+  if (enc.includes('gzip')) decoded = zlib.gunzipSync(buf, { maxOutputLength: MAX_RESPONSE_BYTES });
+  else if (enc.includes('deflate')) decoded = zlib.inflateSync(buf, { maxOutputLength: MAX_RESPONSE_BYTES });
+  else if (enc.includes('br')) decoded = zlib.brotliDecompressSync(buf, { maxOutputLength: MAX_RESPONSE_BYTES });
+  else decoded = buf;
+  if (decoded.length > MAX_RESPONSE_BYTES) throw new Error(`ответ слишком большой: ${decoded.length} байт`);
+  return decoded;
 }
 
 function rawRequest(url, opts, agent, timeoutMs) {
@@ -187,12 +192,13 @@ export function createEisFetch({ timeoutMs = 25000 } = {}) {
     rejectUnauthorized: true,
     maxSockets: 4,
   });
+  const IDEMPOTENT = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
   async function send(url, opts) {
     try {
       return await rawRequest(url, opts, agent, timeoutMs);
     } catch (err) {
-      // Сервер мог закрыть простаивавшее keep-alive соединение — повторяем один раз на новом.
-      if (err?.code !== 'ECONNRESET' || opts.signal?.aborted) throw err;
+      const method = (opts.method || 'GET').toUpperCase();
+      if (err?.code !== 'ECONNRESET' || opts.signal?.aborted || !IDEMPOTENT.has(method)) throw err;
       return rawRequest(url, opts, agent, timeoutMs);
     }
   }
@@ -200,13 +206,21 @@ export function createEisFetch({ timeoutMs = 25000 } = {}) {
     const res = await send(url, opts);
     const location = res.headers.location;
     if (location && [301, 302, 303, 307, 308].includes(res.status) && redirects < 5) {
+      const origin = new URL(url);
       const next = new URL(location, url);
       if (next.protocol !== 'https:' && next.protocol !== 'http:') {
         throw new Error(`редирект на неподдерживаемую схему ${next.protocol}`);
       }
-      const follow = res.status === 303 || ((res.status === 301 || res.status === 302) && opts.method === 'POST')
+      if (next.protocol === 'http:' && origin.protocol === 'https:') {
+        throw new Error(`редирект с HTTPS на HTTP запрещён: ${next.hostname}`);
+      }
+      let follow = res.status === 303 || ((res.status === 301 || res.status === 302) && opts.method === 'POST')
         ? { ...opts, method: 'GET', body: undefined }
-        : opts;
+        : { ...opts };
+      if (next.host !== origin.host && follow.headers) {
+        const { authorization, cookie, ...safe } = follow.headers;
+        follow = { ...follow, headers: safe };
+      }
       return eisFetch(next.toString(), follow, redirects + 1);
     }
     return res;
