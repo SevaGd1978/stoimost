@@ -12,6 +12,7 @@
   <svg class="svg-sprite" aria-hidden="true">
     <defs>
       <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 12 18 6M12 4v2M20 12h-2M12 20v-2M4 12h2"/></symbol>
+      <symbol id="i-today" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M8 15h3M8 18h6"/></symbol>
       <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h2M8 11h2M8 15h2M12 7h1M12 11h1M12 15h1"/></symbol>
       <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 17l-5.4 2.8 1.1-6.1L3.2 9.4l6.1-.8z"/></symbol>
       <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M6.5 8h.01M6.5 12h.01M12.5 8h.01M18.5 8h.01"/></symbol>
@@ -90,6 +91,20 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="modal-tender" hidden>
+    <div class="modal-box tender-modal">
+      <div class="tender-modal-head">
+        <div>
+          <div class="eyebrow">Карточка закупки</div>
+          <div class="card-title tender-modal-title" id="tender-title">Закупка</div>
+          <p class="muted small" id="tender-sub"></p>
+        </div>
+        <button class="btn btn-ghost btn-icon" id="tender-close" type="button" aria-label="Закрыть">✕</button>
+      </div>
+      <div id="tender-body"></div>
+    </div>
+  </div>
+
   <!-- Модальное окно импорта Watchlist -->
   <div class="modal-backdrop" id="modal-import" hidden>
     <div class="modal-box">
@@ -124,7 +139,8 @@
 
       <div class="nav-caption">Рабочее пространство</div>
       <nav class="nav" aria-label="Основная навигация">
-        <button class="nav-item active" data-view="feed"><span class="nav-icon"><svg><use href="#i-radar"/></svg></span><span>Лента</span><span class="nav-badge" id="badge-unseen" hidden>0</span></button>
+        <button class="nav-item active" data-view="today"><span class="nav-icon"><svg><use href="#i-today"/></svg></span><span>Сегодня</span></button>
+        <button class="nav-item" data-view="feed"><span class="nav-icon"><svg><use href="#i-radar"/></svg></span><span>Лента</span><span class="nav-badge" id="badge-unseen" hidden>0</span></button>
         <button class="nav-item" data-view="news"><span class="nav-icon"><svg><use href="#i-building"/></svg></span><span>Стройки</span></button>
         <button class="nav-item" data-view="favorites"><span class="nav-icon"><svg><use href="#i-star"/></svg></span><span>Избранное</span><span class="nav-badge fav-badge" id="badge-fav" hidden>0</span></button>
         <button class="nav-item" data-view="crm"><span class="nav-icon"><svg><use href="#i-board"/></svg></span><span>Воронка</span><span class="nav-badge crm-badge" id="badge-crm" hidden>0</span></button>
@@ -164,6 +180,45 @@
     </aside>
 
     <main class="main">
+      <section class="view" id="view-today">
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Рабочий день</div><h1>Сегодня</h1>
+            <p class="muted" id="today-summary">Что требует внимания: сроки, новые возможности и задачи команды</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" type="button" data-goto="feed">Открыть ленту</button>
+            <button class="btn btn-ghost" type="button" data-goto="crm">Открыть воронку</button>
+          </div>
+        </header>
+
+        <div class="grid-4 mb">
+          <div class="stat-card dashboard-stat"><div class="stat-title">Срок в ближайшие 3 дня</div><div class="stat-big" id="today-urgent-count">0</div><div class="stat-sub">открытых закупок</div></div>
+          <div class="stat-card dashboard-stat"><div class="stat-title">Новые возможности</div><div class="stat-big" id="today-best-count">0</div><div class="stat-sub">непрочитанных закупок</div></div>
+          <div class="stat-card dashboard-stat"><div class="stat-title">Задачи к сроку</div><div class="stat-big" id="today-task-count">0</div><div class="stat-sub">по открытым сделкам</div></div>
+          <div class="stat-card dashboard-stat"><div class="stat-title">Без ответственного</div><div class="stat-big" id="today-unassigned-count">0</div><div class="stat-sub">сделок в воронке</div></div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card dashboard-card">
+            <div class="card-title">Срочные сроки</div>
+            <div class="dashboard-list" id="today-urgent"></div>
+          </div>
+          <div class="card dashboard-card">
+            <div class="card-title">Лучшие новые закупки</div>
+            <div class="dashboard-list" id="today-best"></div>
+          </div>
+          <div class="card dashboard-card">
+            <div class="card-title">Задачи команды</div>
+            <div class="dashboard-list" id="today-tasks"></div>
+          </div>
+          <div class="card dashboard-card">
+            <div class="card-title">Требуют назначения</div>
+            <div class="dashboard-list" id="today-unassigned"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="view" id="view-news" hidden>
         <header class="view-head">
           <div>
@@ -181,7 +236,7 @@
       </section>
 
       <!-- ЛЕНТА -->
-      <section class="view" id="view-feed">
+      <section class="view" id="view-feed" hidden>
         <header class="view-head">
           <div>
             <div class="eyebrow">Оперативный мониторинг</div><h1>Лента закупок</h1>

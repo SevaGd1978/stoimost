@@ -22,6 +22,7 @@ import { legalCheckUrl } from './src/legal-check.js';
 import { collectProjectNews } from './src/news.js';
 import { collectCustomerVolume } from './src/procurement.js';
 import { parseNomenclatureFile } from './src/nomenclature-file.js';
+import { customerKey, daysUntil, enrichTender } from './src/opportunity.js';
 import { SEARCH_LIMITS, mergeFound, parseSearchKeywords, searchSettings } from './src/search.js';
 import {
   CUSTOMER_TYPES,
@@ -338,17 +339,73 @@ function filterTenders(query) {
   return list;
 }
 
-function withCrm(t) {
+function withInsights(t) {
+  const enriched = enrichTender(t, {
+    tenders: Object.values(store.tenders),
+    settings: store.settings,
+    deal: store.deals[t.id],
+  });
   const stage = store.deals[t.id]?.stage;
   const check = legalCheckUrl(t);
-  if (!stage && !check) return t;
-  return { ...t, ...(stage ? { crmStage: stage } : {}), ...(check ? { legalCheckUrl: check } : {}) };
+  return { ...enriched, ...(stage ? { crmStage: stage } : {}), ...(check ? { legalCheckUrl: check } : {}) };
 }
+
+function presentedDeal(deal) {
+  return presentDeal(deal, { tender: store.tenders[deal.id], owner: store.userById(deal.ownerId) });
+}
+
+app.get('/api/dashboard', (_req, res) => {
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  const tenders = Object.values(store.tenders).filter((t) => !t.archived).map(withInsights);
+  const urgent = tenders
+    .filter((t) => t.kind === 'notice' && t.isOpen && daysUntil(t.deadlineAt, now) != null && daysUntil(t.deadlineAt, now) >= 0 && daysUntil(t.deadlineAt, now) <= 3)
+    .sort((a, b) => Date.parse(a.deadlineAt) - Date.parse(b.deadlineAt))
+    .slice(0, 8);
+  const bestNew = tenders
+    .filter((t) => t.kind === 'notice' && t.isOpen && !t.seen)
+    .sort((a, b) => (b.opportunity?.score || 0) - (a.opportunity?.score || 0) || Date.parse(b.firstSeenAt || 0) - Date.parse(a.firstSeenAt || 0))
+    .slice(0, 8);
+  const deals = Object.values(store.deals).filter((deal) => isOpenStage(deal.stage));
+  const tasks = deals
+    .map(presentedDeal)
+    .filter((deal) => (deal.nextStepAt && deal.nextStepAt <= today) || (!deal.nextStepAt && daysUntil(deal.card.deadlineAt, now) != null && daysUntil(deal.card.deadlineAt, now) <= 3))
+    .sort((a, b) => String(a.nextStepAt || a.card.deadlineAt || '').localeCompare(String(b.nextStepAt || b.card.deadlineAt || '')))
+    .slice(0, 8);
+  const unassigned = deals.filter((deal) => !deal.ownerId).map(presentedDeal).slice(0, 8);
+  res.json({
+    generatedAt: new Date(now).toISOString(),
+    stats: stats(),
+    status: scheduler.status,
+    lastRun: store.runs[0] ?? null,
+    counts: { urgent: urgent.length, bestNew: bestNew.length, tasks: tasks.length, unassigned: unassigned.length },
+    urgent,
+    bestNew,
+    tasks,
+    unassigned,
+    news: store.news,
+  });
+});
+
+app.get('/api/tenders/:id', (req, res) => {
+  const tender = store.tenders[req.params.id];
+  if (!tender) return res.status(404).json({ error: 'Тендер не найден' });
+  const key = customerKey(tender);
+  const related = key
+    ? Object.values(store.tenders)
+        .filter((item) => item.id !== tender.id && customerKey(item) === key)
+        .sort((a, b) => Date.parse(b.publishedAt ?? 0) - Date.parse(a.publishedAt ?? 0))
+        .slice(0, 6)
+        .map(withInsights)
+    : [];
+  const deal = store.deals[tender.id];
+  res.json({ ...withInsights(tender), deal: deal ? presentedDeal(deal) : null, related });
+});
 
 app.get('/api/tenders', (req, res) => {
   const list = filterTenders(req.query);
   const limit = Math.min(Number(req.query.limit) || 200, 1000);
-  res.json({ total: list.length, items: list.slice(0, limit).map(withCrm) });
+  res.json({ total: list.length, items: list.slice(0, limit).map(withInsights) });
 });
 
 app.get('/api/customers/procurement', async (req, res) => {

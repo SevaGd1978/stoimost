@@ -14,6 +14,8 @@
     stats: null,
     tenders: [],
     favorites: [],
+    dashboard: null,
+    currentTender: null,
     browserNotify: localStorage.getItem('ts.browserNotify') === '1',
   };
 
@@ -58,6 +60,7 @@
     if (name === 'users' && !isAdmin()) name = 'settings';
     $$('.view').forEach((v) => (v.hidden = v.id !== `view-${name}`));
     $$('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+    if (name === 'today') loadDashboard().catch((e) => toast(e.message, 'err'));
     if (name === 'favorites') loadFavorites().catch((e) => toast(e.message, 'err'));
     if (name === 'crm') loadCrm().catch((e) => toast(e.message, 'err'));
     if (name === 'users') loadUsers().catch((e) => toast(e.message, 'err'));
@@ -68,6 +71,7 @@
     location.hash = name;
   }
   $$('.nav-item').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+  $$('[data-goto]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.goto)));
 
   // ---------- state ----------
   async function loadState() {
@@ -216,6 +220,131 @@
       .join('');
   }
 
+  function scoreBadge(t, action = false) {
+    const opportunity = t.opportunity;
+    if (!opportunity) return '';
+    const content = `${opportunity.score} · ${esc(opportunity.label)}`;
+    return action
+      ? `<button type="button" class="score-badge score-${opportunity.level}" data-act="details" title="Открыть внутреннюю карточку и объяснение рейтинга">${content}</button>`
+      : `<span class="score-badge score-${opportunity.level}" title="Рейтинг перспективности">${content}</span>`;
+  }
+
+  function dashboardTenderItem(t, note = '') {
+    const left = daysLeft(t.deadlineAt);
+    const meta = [t.customer, t.price != null ? `${fmtPrice(t.price)} ₽` : '', left != null ? (left < 0 ? 'срок завершён' : `осталось ${left} дн.`) : '', note].filter(Boolean).join(' · ');
+    return `<button type="button" class="dashboard-item" data-detail-id="${esc(t.id)}">
+      <span class="dashboard-item-main"><b>${esc(t.title)}</b><small>${esc(meta)}</small></span>
+      ${scoreBadge(t)}
+    </button>`;
+  }
+
+  function dashboardDealItem(deal, note = '') {
+    const meta = [deal.card?.customer, deal.ownerName || 'без ответственного', deal.nextStep || note, deal.nextStepAt ? `до ${fmtDate(deal.nextStepAt)}` : ''].filter(Boolean).join(' · ');
+    return `<button type="button" class="dashboard-item" data-deal-id="${esc(deal.id)}">
+      <span class="dashboard-item-main"><b>${esc(deal.card?.title || deal.id)}</b><small>${esc(meta)}</small></span>
+      <span class="tag stage-open">${esc(deal.stageLabel || '')}</span>
+    </button>`;
+  }
+
+  async function loadDashboard() {
+    const data = await api('/api/dashboard');
+    state.dashboard = data;
+    renderDashboard();
+  }
+
+  function renderDashboard() {
+    const data = state.dashboard;
+    if (!data) return;
+    $('#today-urgent-count').textContent = data.counts?.urgent ?? 0;
+    $('#today-best-count').textContent = data.counts?.bestNew ?? 0;
+    $('#today-task-count').textContent = data.counts?.tasks ?? 0;
+    $('#today-unassigned-count').textContent = data.counts?.unassigned ?? 0;
+    $('#today-summary').textContent = data.lastRun
+      ? `Обновлено ${fmtDateTime(data.generatedAt)} · последний опрос: найдено ${data.lastRun.found}, новых ${data.lastRun.added}`
+      : `Обновлено ${fmtDateTime(data.generatedAt)} · опросов ещё не было`;
+    $('#today-urgent').innerHTML = data.urgent?.length ? data.urgent.map((t) => dashboardTenderItem(t)).join('') : '<p class="muted small">Срочных открытых закупок нет.</p>';
+    $('#today-best').innerHTML = data.bestNew?.length ? data.bestNew.map((t) => dashboardTenderItem(t, t.seen ? '' : 'новая')).join('') : '<p class="muted small">Непрочитанных закупок пока нет.</p>';
+    $('#today-tasks').innerHTML = data.tasks?.length ? data.tasks.map((deal) => dashboardDealItem(deal)).join('') : '<p class="muted small">Просроченных и срочных задач нет.</p>';
+    $('#today-unassigned').innerHTML = data.unassigned?.length ? data.unassigned.map((deal) => dashboardDealItem(deal, 'назначьте ответственного')).join('') : '<p class="muted small">У всех открытых сделок есть ответственный.</p>';
+  }
+
+  function checklistIcon(status) {
+    return status === 'done' ? '✓' : status === 'warn' ? '!' : '○';
+  }
+
+  function renderTenderDetail(detail) {
+    const t = detail;
+    const opportunity = t.opportunity || {};
+    const deal = t.deal;
+    const facts = [
+      ['Заказчик', t.customer || '—'],
+      ['ИНН заказчика', t.customerInn || '—'],
+      ['Поставщик', t.supplier || '—'],
+      ['Регион', t.region || '—'],
+      ['Способ закупки', t.method || '—'],
+      ['Номер', t.number || '—'],
+      ['Размещено', fmtDate(t.publishedAt)],
+      ['Срок', t.deadlineAt ? `${fmtDate(t.deadlineAt)}${opportunity.daysLeft != null ? ` · осталось ${opportunity.daysLeft} дн.` : ''}` : '—'],
+      ['Статус', t.stage || (t.isOpen ? 'открыта' : 'закрыта')],
+      ['Документы', t.documents?.state === 'done' ? `PDF собран · ${t.documents.pages} стр.` : t.documents?.state || 'ещё не извлекались'],
+    ];
+    const reasons = (opportunity.reasons || []).map((item) => `<li>${esc(item)}</li>`).join('');
+    const risks = (opportunity.risks || []).map((item) => `<li>${esc(item)}</li>`).join('');
+    const checklist = (opportunity.checklist || [])
+      .map((item) => `<div class="check-item check-${item.status}"><span>${checklistIcon(item.status)}</span><div><b>${esc(item.label)}</b><small>${esc(item.hint)}</small></div></div>`)
+      .join('');
+    const related = (t.related || []).map((item) => dashboardTenderItem(item)).join('');
+    $('#tender-title').textContent = t.title || 'Закупка';
+    const bits = [t.customer, t.number ? `№ ${t.number}` : '', t.region].filter(Boolean);
+    $('#tender-sub').textContent = bits.join(' · ');
+    $('#tender-body').innerHTML = `
+      <div class="detail-score score-panel-${opportunity.level || 'low'}">
+        <div class="detail-score-number">${opportunity.score ?? '—'}<small>/100</small></div>
+        <div class="detail-score-main">
+          <b>Перспективность: ${esc(opportunity.label || 'не оценена')}</b>
+          <div class="score-meter"><span style="width:${opportunity.score || 0}%"></span></div>
+          <div class="detail-columns">
+            <div><div class="detail-subtitle">Почему подходит</div><ul>${reasons || '<li>Сильных сигналов пока нет</li>'}</ul></div>
+            <div><div class="detail-subtitle">Риски и ограничения</div><ul>${risks || '<li>Явных рисков по карточке не видно</li>'}</ul></div>
+          </div>
+        </div>
+      </div>
+      <div class="detail-actions">
+        <a class="btn btn-primary" href="${esc(t.url)}" target="_blank" rel="noopener">Открыть в источнике</a>
+        <button class="btn" type="button" data-detail-act="favorite">${t.favorite ? '★ В избранном' : '☆ В избранное'}</button>
+        <button class="btn" type="button" data-detail-act="crm">${deal ? 'Открыть в воронке' : 'В воронку'}</button>
+        ${t.documents?.state === 'done' ? `<a class="btn" href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">Открыть PDF</a>` : `<button class="btn" type="button" data-detail-act="docs">Извлечь документы</button>`}
+        <span id="detail-customer-tools">${customerTools(t)}</span>
+      </div>
+      ${deal ? `<div class="detail-deal"><b>Воронка:</b> ${esc(deal.stageLabel)} · ${esc(deal.ownerName || 'без ответственного')}${deal.nextStep ? ` · следующий шаг: ${esc(deal.nextStep)}` : ''}${deal.bid != null ? ` · предложение: ${fmtPrice(deal.bid)} ₽` : ''}</div>` : ''}
+      <div class="detail-grid">
+        <div>
+          <div class="card-title">Ключевые факты</div>
+          <table class="table detail-facts"><tbody>${facts.map(([label, value]) => `<tr><th>${esc(label)}</th><td>${esc(value)}</td></tr>`).join('')}</tbody></table>
+          <div class="volume-total detail-price">${fmtPrice(t.price)} <small>₽</small></div>
+        </div>
+        <div>
+          <div class="card-title">Чек-лист рассмотрения</div>
+          <div class="check-list">${checklist}</div>
+        </div>
+      </div>
+      ${related ? `<div class="card-title mt">Другие закупки заказчика</div><div class="dashboard-list">${related}</div>` : ''}`;
+  }
+
+  async function openTenderDetail(id) {
+    $('#modal-tender').hidden = false;
+    $('#tender-title').textContent = 'Загружаем закупку…';
+    $('#tender-sub').textContent = '';
+    $('#tender-body').innerHTML = '<p class="muted"><span class="spinner"></span> Собираем карточку, рейтинг и чек-лист…</p>';
+    try {
+      const detail = await api(`/api/tenders/${encodeURIComponent(id)}`);
+      state.currentTender = detail;
+      renderTenderDetail(detail);
+    } catch (err) {
+      $('#tender-body').innerHTML = `<p class="docs-error">${esc(err.message)}</p>`;
+    }
+  }
+
   function renderTender(t, { inFavorites = false } = {}) {
     const left = daysLeft(t.deadlineAt);
     const dlClass = left == null ? '' : left < 0 ? 'over' : left <= 3 ? 'soon' : '';
@@ -257,7 +386,9 @@
         <div class="tender-right">
           <div class="price">${fmtPrice(t.price)} <small>₽</small></div>
           <div class="deadline ${dlClass}">${esc(dlText)}</div>
+          ${scoreBadge(t, true)}
           <div class="tender-actions">
+            <button class="btn btn-sm" data-act="details" title="Внутренняя карточка, рейтинг и чек-лист">Карточка</button>
             <button class="btn btn-sm" data-act="crm" title="Вести закупку в воронке участия">${t.crmStage ? 'В воронке' : 'В воронку'}</button>
             <button class="btn btn-sm fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="${t.favorite ? 'Убрать из избранного' : 'Отложить для дальнейшего рассмотрения'}">${t.favorite ? '★ В избранном' : '☆ В избранное'}</button>
             <button class="btn btn-sm btn-icon" data-act="seen" title="${t.seen ? 'Отметить как новое' : 'Прочитано'}">${t.seen ? '↺' : '✓'}</button>
@@ -354,6 +485,7 @@
       if (!t) return;
       if (btn.dataset.act === 'docs') return extractDocs(t);
       if (btn.dataset.act === 'docs-list') return toggleDocsList(t, btn);
+      if (btn.dataset.act === 'details') return openTenderDetail(t.id);
       if (btn.dataset.act === 'crm') return openInCrm(t);
       if (btn.dataset.act === 'volume') return openVolume(t);
       const patch =
@@ -465,6 +597,55 @@
 
   $('#volume-close').addEventListener('click', () => {
     $('#modal-volume').hidden = true;
+  });
+
+  $('#tender-close').addEventListener('click', () => {
+    $('#modal-tender').hidden = true;
+  });
+
+  $('#modal-tender').addEventListener('click', async (e) => {
+    const related = e.target.closest('[data-detail-id]');
+    if (related) return openTenderDetail(related.dataset.detailId);
+    const volume = e.target.closest('button[data-act="volume"]');
+    if (volume && state.currentTender) return openVolume(state.currentTender);
+    const btn = e.target.closest('[data-detail-act]');
+    if (!btn || !state.currentTender) return;
+    const detail = state.currentTender;
+    try {
+      if (btn.dataset.detailAct === 'favorite') {
+        const updated = await api(`/api/tenders/${encodeURIComponent(detail.id)}`, { method: 'PATCH', body: { favorite: !detail.favorite } });
+        detail.favorite = updated.favorite;
+        renderTenderDetail(detail);
+        await Promise.all([loadFeed(), loadFavorites(), loadDashboard()]);
+        toast(updated.favorite ? 'Добавлено в «Избранное»' : 'Убрано из «Избранного»', 'ok');
+      } else if (btn.dataset.detailAct === 'crm') {
+        $('#modal-tender').hidden = true;
+        if (detail.deal) {
+          showView('crm');
+          await openCrmModal(detail.deal);
+        } else {
+          await openInCrm(detail);
+        }
+      } else if (btn.dataset.detailAct === 'docs') {
+        const job = await api(docsUrl(detail), { method: 'POST' });
+        detail.documents = { state: job.state, step: job.step };
+        renderTenderDetail(detail);
+        toast('Извлечение документов запущено', 'ok');
+      }
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+  });
+
+  $('#view-today').addEventListener('click', async (e) => {
+    const tenderItem = e.target.closest('[data-detail-id]');
+    if (tenderItem) return openTenderDetail(tenderItem.dataset.detailId);
+    const dealItem = e.target.closest('[data-deal-id]');
+    if (!dealItem) return;
+    showView('crm');
+    await loadCrm();
+    const deal = crmState.deals.find((item) => item.id === dealItem.dataset.dealId);
+    if (deal) fillCrmForm(deal);
   });
 
   async function toggleDocsList(t, btn) {
@@ -1015,7 +1196,7 @@
     } catch (err) {
       toast(err.message, 'err');
     } finally {
-      await Promise.all([loadState(), loadFeed()]);
+      await Promise.all([loadState(), loadFeed(), loadDashboard().catch(() => {})]);
     }
   });
 
@@ -1028,7 +1209,7 @@
     });
     es.addEventListener('run:done', async (e) => {
       const { run, added } = JSON.parse(e.data);
-      await Promise.all([loadState(), loadFeed()]);
+      await Promise.all([loadState(), loadFeed(), loadDashboard().catch(() => {})]);
       if (added.length && state.browserNotify && Notification.permission === 'granted') {
         const first = added[0];
         const n = new Notification(`Tender Spy: ${added.length} новых закупок`, {
@@ -1260,8 +1441,9 @@
       await loadFeed();
       connectEvents();
       const view = location.hash.replace('#', '');
-      if (['feed', 'favorites', 'news', 'crm', 'watchlist', 'analytics', 'settings', 'users', 'log'].includes(view)) showView(view);
+      if (['today', 'feed', 'favorites', 'news', 'crm', 'watchlist', 'analytics', 'settings', 'users', 'log'].includes(view)) showView(view);
       else if (!state.watchlist.nomenclature.length) showView('watchlist');
+      else showView('today');
     } catch (err) {
       toast(`Не удалось загрузить: ${err.message}`, 'err');
     }
