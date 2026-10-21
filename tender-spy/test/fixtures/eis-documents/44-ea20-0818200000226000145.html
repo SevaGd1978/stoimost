@@ -1,0 +1,808 @@
+<html><body>
+                            <a data-modalup href="/epz/order/notice/printForm/listModal.html?regNumber=0818200000226000145" class="distancedText">
+                                <img src="/epz/static/img/icons/icon_key.svg" alt=""/>
+                            </a>
+                        
+                        
+                            <a href="/epz/order/notice/printForm/view.html?regNumber=0818200000226000145" target="_blank">
+                                <img src="/epz/static/img/icons/icon_print_small.svg" alt=""/>
+                            </a>
+                        
+                    </div>
+                </div>
+                <div class="cardMainInfo__status">
+                    <span class="cardMainInfo__purchaseLink distancedText">
+                        <a href="#" target="_blank">№ 0818200000226000145</a>
+                    </span>
+                    <span class="cardMainInfo__state distancedText">Подача заявок</span>
+                </div>
+            </div>
+            <div class="sectionMainInfo__body">
+                
+                
+                
+                    <div class="cardMainInfo__section">
+                        <span class="cardMainInfo__title">Объект закупки</span>
+                        <span class="cardMainInfo__content text-break">Поставка запасных частей для автомобилей марок Genesis, Hyundai</span>
+                    </div>
+                
+                
+                <div class="cardMainInfo__section">
+                    <span class="cardMainInfo__title">
+                        
+                            
+                            
+                            
+                                Заказчик
+                            
+                        
+                    </span>
+                    <span class="cardMainInfo__content">
+                        <a href="/epz/organization/view/info.html?organizationCode=08182000002" target="_blank">ГОСУДАРСТВЕННОЕ КАЗЕННОЕ УЧРЕЖДЕНИЕ КРАСНОДАРСКОГО КРАЯ "АВТОБАЗА ОРГАНОВ ГОСУДАРСТВЕННОЙ ВЛАСТИ КРАСНОДАРСКОГО КРАЯ"</a>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="sectionMainInfo borderRight col-3 colSpaceBetween">
+            <div class="price">
+                
+                    <span class="cardMainInfo__title">
+                        Начальная цена
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    </span>
+                    <span class="cardMainInfo__content cost">
+                        590 000,00 ₽
+                    </span>
+                
+            </div>
+            <div class="date">
+                <div class="row">
+                    <div class="cardMainInfo__section col-6">
+                        <span class="cardMainInfo__title">Размещено</span>
+                        <span class="cardMainInfo__content">
+                            22.09.2026 
+                        </span>
+                    </div>
+                    <div class="cardMainInfo__section col-6">
+                        
+                            <span class="cardMainInfo__title">Обновлено</span>
+                            <span class="cardMainInfo__content">
+                            22.09.2026 
+                        </span>
+                        
+                    </div>
+                </div>
+                <div class="cardMainInfo__section">
+                    
+                        <span class="cardMainInfo__title">Окончание подачи заявок</span>
+                        <span class="cardMainInfo__content">30.09.2026 </span>
+                    
+                </div>
+            </div>
+        </div>
+        <div class="sectionMainInfo col-3 colSpaceBetween mt-auto rel-links">
+            <div></div>
+            <div class="rel-links">
+                
+                    
+                        
+                        
+                            
+                        
+                    
+                    <a href="/epz/order/notice/view/common-info.html?regNumber=0818200000226000145#positionKTRU">Позиция КТРУ</a>
+                
+                
+                    <a class="cursorPointer" onclick="openPlanGraphSearchUrl('262230805126623080100104440012932244')">Позиция
+                        плана-графика</a>
+                
+                
+                    <a class="cursorPointer" onclick="openContractUrl('0818200000226000145')">Контракт</a>
+                
+                
+                
+                    <a class="cursorPointer" onclick="openComplaintSearch('0818200000226000145')">Жалоба</a>
+                
+                
+                    <a class="cursorPointer" onclick="openUnscheduledInspection('0818200000226000145')">Внеплановая
+                        проверка</a>
+                
+                
+            </div>
+        </div>
+    </div>
+</div>
+<script type="text/javascript">
+    function openComplaintSearch(number) {
+        var url = "/epz/complaint/search/search_eis.html?searchString=" +
+            number +
+            "&strictEqual=on&fz94=on&cancelled=on&considered=on&regarded=on";
+        window.open(url);
+    }
+
+    function bankGuaranteeUrl(recordNotificationNumber) {
+        var regex = /(<([^>]+)>)/ig;
+        var removeXML = recordNotificationNumber.replace(regex, "");
+        var url = "/epz/bankguarantee/search/results.html?searchString=&orderNumber=" + removeXML + "&openMode=USE_DEFAULT_PARAMS";
+        url += "&published=on&rejected=on&terminated=on&stopped=on&application=on&contract=on&currencyId=1";
+        window.open(url);
+    }
+
+    function openContractUrl(number) {
+        var url = "/epz/contract/search/results.html?searchString=&orderNumber=" + number + "&openMode=USE_DEFAULT_PARAMS";
+        url += "&fz44=on&priceFrom=0&priceTo=200000000000&contractStageList=0%2C1%2C2%2C3&budgetaryFunds=on&extraBudgetaryFunds=on";
+        window.open(url);
+    }
+
+    function openPlanGraphSearchUrl(ikz) {
+        const pgzIKZInputNameYear = ikz.substring(0, 2);
+        const pgzIKZInputNameIkz = ikz.substring(2, 22);
+        const pgzIKZInputNameNumPZ = ikz.substring(22, 26);
+        const pgzIKZInputNameOkpd2 = ikz.substring(29, 33);
+        const pgzIKZInputNameKvr = ikz.substring(33, 36);
+        const url = "/epz/orderplan/search/results.html?fz44=on" +
+            "&pgzIKZInputNameYear=" + pgzIKZInputNameYear +
+            "&pgzIKZInputNameIkz=" + pgzIKZInputNameIkz +
+            "&pgzIKZInputNameNumPZ=" + pgzIKZInputNameNumPZ +
+            "&pgzIKZInputNameOkpd2=" + pgzIKZInputNameOkpd2 +
+            "&pgzIKZInputNameKvr=" + pgzIKZInputNameKvr;
+        window.open(url);
+    }
+
+    function openUnscheduledInspection(notificationNumber) {
+        var url = "/epz/unscheduledinspection/search/results.html?order=" + notificationNumber;
+        window.open(url);
+    }
+
+    function openRdik(rdikLink) {
+        var url = rdikLink;
+        window.open(url);
+    }
+
+    function openOrderRdik(notificationNumber) {
+        var url = window.location.href.split('/view')[0] + "/view/supplier-results.html?regNumber=" + notificationNumber + "#rdik";
+        window.open(url);
+    }
+</script>
+
+
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div class="container">
+    <div class="tabsNav d-flex align-items-end">
+        
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+    <a href="/epz/order/notice/ea20/view/common-info.html?regNumber=0818200000226000145"
+            
+                
+                
+                    class="tabsNav__item"
+                
+            
+    >
+        
+            
+            
+            
+                
+            
+        
+        Общая информация
+    </a>
+
+
+
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+    <a href="/epz/order/notice/ea20/view/documents.html?regNumber=0818200000226000145"
+            
+                
+                    class="tabsNav__item tabsNav__item_active"
+                
+                
+            
+    >
+        
+            
+            
+            
+                
+            
+        
+        Документы
+    </a>
+
+
+        
+
+        
+
+        
+
+        
+            
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+    
+
+
+
+
+    <a href="/epz/order/notice/ea20/view/event-journal.html?regNumber=0818200000226000145"
+            
+                
+                
+                    class="tabsNav__item"
+                
+            
+    >
+        
+            
+            
+            
+                
+            
+        
+        Журнал событий
+    </a>
+
+
+        
+    </div>
+</div>
+
+<script>
+    $(document).ready(function () {
+        $('.contentTabsWrapper td[tab = "PURCHASE_DOCS"]').addClass('currentTab');
+        
+        if ($('.contentTabsWrapper tr').width() > 980 && false) {
+            $('[tab="EVENT_LOG"]').css('display', 'none');
+        }
+        
+    });
+</script>
+<script type="text/javascript" src="/epz/order/notice/js/card/view/medExport-priz.js"></script>
+
+    </div>
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    
+
+
+
+
+
+
+
+
+    
+        <div class="container">
+            <div class="blockInfo">
+                <label class="switch classSelectorClickAttach">
+                    <input type="checkbox" class="inactive-redaction-toggle">
+                    <span class="slider round"></span>
+                    <span class="slider-text" id="revisionViewToggle">Отображать недействующие редакции</span>
+                </label>
+            </div>
+        </div>
+
+        <hr class="graySeparator">
+    
+
+
+<div class="container">
+    <div class="col-sm-12 blockInfo">
+        <h2 class="blockInfo__title">Извещение, изменение извещения о проведении электронного аукциона</h2>
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+    
+        
+        
+        
+        
+            
+                
+            
+            <div class="row no-gutters notice-documents blockInfo__section first-row-active-documents closedInactiveDocuments borderNone">
+                
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+        <div class="col-sm-6 b-r">
+            <div class="row no-gutters">
+                
+                    <div class="col-sm-2">
+                        
+                            <div class="float-left">
+                                <a data-modalup href="/epz/order/notice/signview/listModal.html?reestrNumber=0818200000226000145&documentNumber=№0818200000226000145">
+                                    <span class="icon icon-big icon-cryptoSign"></span>
+                                </a>
+                            </div>
+                        
+                        
+                            <div class="float-right">
+                                <a href="/epz/order/notice/printForm/viewByVersionNumber.html?regNumber=0818200000226000145&versionNumber=1&qualifier=regNumberAndVersion" title="Печатная форма" target="_blank">
+                                    <span class="icon icon-big icon-print"></span>
+                                </a>
+                            </div>
+                        
+                    </div>
+                
+                <div class="col-sm-10">
+                    <div class="col">
+                        <div class="section__value docName">
+                            
+                                
+                                
+                                
+                                    <span class="">
+                                            Извещение о проведении электронного аукциона от 22.09.2026 №0818200000226000145
+                                        
+                                    </span>
+                                
+                            
+                        </div>
+                        <div class="row">
+                            
+                                <div class="col-sm">
+                                    <div class="section__attrib">Размещено</div>
+                                    <div class="section__value ">
+                                        22.09.2026 15:00 <span class='timeZoneName' title='Москва, стандартное время'>(МСК)</span>
+                                    </div>
+                                </div>
+                            
+                            
+                                <div class="col-sm">
+                                    <div class="section__attrib">Редакция</div>
+                                    <div class="section__value ">
+                                        
+                                            
+                                            Действующая
+                                        
+                                    </div>
+                                    
+                                </div>
+                            
+                            
+                        </div>
+                        
+                            <div class="">
+                                <div class="row">
+                                    <div class="col-sm-12">
+                                        <br>
+                                        <div style="font-size: 14px">Пройден контроль по ч.5.1 ст. 99 44-ФЗ</div>
+                                        <div style="font-size: 14px">(автоматизированный контроль средствами ЕИС)</div>
+                                    </div>
+                                </div>
+                            </div>
+                        
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+            <div class="col-sm-6">
+                <div class="blockFilesTabDocs">
+                    <div class="section__title mb-3">Прикрепленные файлы</div>
+                    
+                        
+                        
+                        <div class="attachment row ">
+                            <div class="col clipText">
+                                
+                                    <a data-modalup class="pWidth_840 vAlignMiddle margRight5 cryptoSignsSmall" href="/epz/order/notice/signview/ep/listModal.html?reestrNumber=0818200000226000145&uid=01A0C7E34F8B7F198BC88BD09A6A1F7C">
+                                        <span class="icon icon-small icon-cryptoSign_small vAlignMiddle"></span>
+                                    </a>
+                                
+                                <img alt="Microsoft Excel Document" src="/epz/static/img/icons/type/xlsx.svg" class="vAlignMiddle margRight5" data-tooltip="<span class='custom-tooltiptext'>Microsoft Excel Document</span>"/>
+                                <span class="section__value">
+                                    <a href="https://zakupki.gov.ru/44fz/filestore/public/1.0/download/priz/file.html?uid=01A0C7E34F8B7F198BC88BD09A6A1F7C" title="Обоснование НЦЕтру 5920.xlsx">
+                                        Обоснование НЦЕтру 5920.xlsx
+                                    </a>
+                                </span>
+                            </div>
+                        </div>
+                    
+                        
+                        
+                        <div class="attachment row ">
+                            <div class="col clipText">
+                                
+                                    <a data-modalup class="pWidth_840 vAlignMiddle margRight5 cryptoSignsSmall" href="/epz/order/notice/signview/ep/listModal.html?reestrNumber=0818200000226000145&uid=01A0C7E35E117E3893D91FC762541FDB">
+                                        <span class="icon icon-small icon-cryptoSign_small vAlignMiddle"></span>
+                                    </a>
+                                
+                                <img alt="Microsoft Word Document" src="/epz/static/img/icons/type/docx.svg" class="vAlignMiddle margRight5" data-tooltip="<span class='custom-tooltiptext'>Microsoft Word Document</span>"/>
+                                <span class="section__value">
+                                    <a href="https://zakupki.gov.ru/44fz/filestore/public/1.0/download/priz/file.html?uid=01A0C7E35E117E3893D91FC762541FDB" title="Проект контракта 5920.docx">
+                                        Проект контракта 5920.docx
+                                    </a>
+                                </span>
+                            </div>
+                        </div>
+                    
+                        
+                        
+                        <div class="attachment row ">
+                            <div class="col clipText">
+                                
+                                    <a data-modalup class="pWidth_840 vAlignMiddle margRight5 cryptoSignsSmall" href="/epz/order/notice/signview/ep/listModal.html?reestrNumber=0818200000226000145&uid=01A0C7E359197185917460B22D33F7F7">
+                                        <span class="icon icon-small icon-cryptoSign_small vAlignMiddle"></span>
+                                    </a>
+                                
+                                <img alt="Microsoft Excel Document" src="/epz/static/img/icons/type/xlsx.svg" class="vAlignMiddle margRight5" data-tooltip="<span class='custom-tooltiptext'>Microsoft Excel Document</span>"/>
+                                <span class="section__value">
+                                    <a href="https://zakupki.gov.ru/44fz/filestore/public/1.0/download/priz/file.html?uid=01A0C7E359197185917460B22D33F7F7" title="Описание объекта закупки 5920.xlsx">
+                                        Описание объекта закупки 5920.xlsx
+                                    </a>
+                                </span>
+                            </div>
+                        </div>
+                    
+                        
+                        
+                        <div class="attachment row ">
+                            <div class="col clipText">
+                                
+                                    <a data-modalup class="pWidth_840 vAlignMiddle margRight5 cryptoSignsSmall" href="/epz/order/notice/signview/ep/listModal.html?reestrNumber=0818200000226000145&uid=01A0C7E34D6F742DA16A493C76A956FF">
+                                        <span class="icon icon-small icon-cryptoSign_small vAlignMiddle"></span>
+                                    </a>
+                                
+                                <img alt="Microsoft Word Document" src="/epz/static/img/icons/type/docx.svg" class="vAlignMiddle margRight5" data-tooltip="<span class='custom-tooltiptext'>Microsoft Word Document</span>"/>
+                                <span class="section__value">
+                                    <a href="https://zakupki.gov.ru/44fz/filestore/public/1.0/download/priz/file.html?uid=01A0C7E34D6F742DA16A493C76A956FF" title="Требование к содержанию, составу заявки на участие в закупке и инструкция по ее заполнению.docx">
+                                        Требование к содержанию, составу заявки на участие в закупке и инструкция по ее заполнению.docx
+                                    </a>
+                                </span>
+                            </div>
+                        </div>
+                    
+                    
+                </div>
+            </div>
+        
+    
+
+
+            </div>
+            
+            
+                
+            
+        
+        
+    
+
+
+
+    </div>
+</div>
+
+<hr class="graySeparator">
+
+<div class="container">
+    <div class="col-sm-12 blockInfo">
+        <h2 class="blockInfo__title">Изменение организации, осуществляющей размещение</h2>
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+        
+            <span class="section__title">Информация отсутствует</span>
+        
+    
+    
+
+
+
+    </div>
+</div>
+
+<hr class="graySeparator">
+
+<div class="container">
+    <div class="col-sm-12 blockInfo">
+        <h2 class="blockInfo__title">Квитанции результатов согласования извещений о проведении электронного аукциона</h2>
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    
+        
+            <span class="section__title">Информация отсутствует</span>
+        
+    
+    
+
+
+
+    </div>
+</div>
+
+<hr class="graySeparator">
+
+<div class="container">
+    <div class="col-sm-12 blockInfo">
+        <h2 cla
+</body></html>

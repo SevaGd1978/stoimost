@@ -1,0 +1,16 @@
+meta:
+  environment: docker
+  toolchain:
+    name: docker
+    params: {}
+
+# Сборка через Dockerfile: в образ ставятся LibreOffice и unar для кнопки «Извлечь документы».
+# Прямые запросы к ЕИС доверяют сертификату Минцифры в коде (tender-spy/src/eis-tls.js),
+# NODE_EXTRA_CA_CERTS задаётся в Dockerfile. База пишется в постоянный том /data.
+build:
+  dockerfile: Dockerfile
+  skip: false
+
+run:
+  persistenceMount: /data
+  containerPort: 3000

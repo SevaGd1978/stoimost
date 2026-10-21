@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tender Spy — мониторинг тендеров по номенклатуре</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b2b26'/%3E%3Ccircle cx='32' cy='32' r='17' fill='none' stroke='%2334d399' stroke-width='5'/%3E%3Ccircle cx='32' cy='32' r='5' fill='%23fbbf24'/%3E%3Cpath d='M32 32L47 17' stroke='%23fbbf24' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#0b2b26" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <svg class="svg-sprite" aria-hidden="true">
+    <defs>
+      <symbol id="i-radar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 12 18 6M12 4v2M20 12h-2M12 20v-2M4 12h2"/></symbol>
+      <symbol id="i-today" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M8 15h3M8 18h6"/></symbol>
+      <symbol id="i-building" viewBox="0 0 24 24"><path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16M16 9h3a1 1 0 0 1 1 1v11M2 21h20M8 7h2M8 11h2M8 15h2M12 7h1M12 11h1M12 15h1"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 17l-5.4 2.8 1.1-6.1L3.2 9.4l6.1-.8z"/></symbol>
+      <symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16M6.5 8h.01M6.5 12h.01M12.5 8h.01M18.5 8h.01"/></symbol>
+      <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></symbol>
+      <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/></symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4L5.1 10.8A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></symbol>
+      <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.7-3.2 3.2-5 6.5-5s5.8 1.8 6.5 5M16 4.7a3.5 3.5 0 0 1 0 6.6M18.5 15.4c1.7.7 2.7 2.2 3 4.6"/></symbol>
+      <symbol id="i-log" viewBox="0 0 24 24"><path d="M6 2h10l4 4v16H6zM16 2v4h4M9 12h6M9 16h6M9 8h3"/></symbol>
+      <symbol id="i-scan" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.3M21 3v6h-6"/></symbol>
+      <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12 5 5L20 6"/></symbol>
+      <symbol id="i-clean" viewBox="0 0 24 24"><path d="m13 3 7 7-9 9H4v-7zM15 5l4 4M4 21h16"/></symbol>
+    </defs>
+  </svg>
+  <div class="toast-stack" id="toasts"></div>
+
+  <div class="modal-backdrop" id="modal-crm" hidden>
+    <div class="modal-box crm-modal">
+      <div class="card-title" id="crm-title">Закупка</div>
+      <p class="muted small" id="crm-sub"></p>
+      <div class="form-row">
+        <div class="field grow">
+          <label>Этап</label>
+          <select class="input" id="crm-stage"></select>
+        </div>
+        <div class="field grow">
+          <label>Ответственный</label>
+          <select class="input" id="crm-owner"></select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="field grow">
+          <label>Наше предложение, ₽</label>
+          <input class="input" id="crm-bid" inputmode="decimal" placeholder="как НМЦК, если не заполнено" />
+        </div>
+        <div class="field grow">
+          <label>Следующий шаг</label>
+          <input class="input" id="crm-next" maxlength="300" placeholder="запросить КП, сверить ТЗ…" />
+        </div>
+        <div class="field">
+          <label>Когда</label>
+          <input class="input" id="crm-next-at" type="date" />
+        </div>
+      </div>
+      <div class="field" id="crm-lost-row" hidden>
+        <label>Почему отказ</label>
+        <input class="input" id="crm-lost" maxlength="300" placeholder="не наш регион, цена, срок" />
+      </div>
+      <div class="form-row mt-sm">
+        <button class="btn btn-primary" id="crm-save" type="button">Сохранить</button>
+        <a class="btn btn-ghost" id="crm-link" href="#" target="_blank" rel="noopener">Открыть закупку</a>
+        <button class="btn btn-ghost admin-only" id="crm-delete" type="button">Убрать из воронки</button>
+      </div>
+      <div class="card-title mt">Комментарии</div>
+      <div class="crm-log" id="crm-log"></div>
+      <form class="form-row mt-sm" id="crm-note-form">
+        <input class="input" id="crm-note" maxlength="1000" placeholder="Что сделали, с кем говорили…" />
+        <button class="btn btn-primary" type="submit">Добавить</button>
+      </form>
+      <div class="form-row mt-sm">
+        <button class="btn btn-ghost" id="crm-close" type="button">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-volume" hidden>
+    <div class="modal-box volume-modal">
+      <div class="card-title" id="volume-title">Объём закупок</div>
+      <p class="muted small" id="volume-sub"></p>
+      <div id="volume-body"></div>
+      <div class="form-row mt">
+        <a class="btn btn-ghost" id="volume-registry" href="#" target="_blank" rel="noopener" hidden>Открыть реестр ЕИС</a>
+        <button class="btn btn-ghost" id="volume-close" type="button">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-tender" hidden>
+    <div class="modal-box tender-modal">
+      <div class="tender-modal-head">
+        <div>
+          <div class="eyebrow">Карточка закупки</div>
+          <div class="card-title tender-modal-title" id="tender-title">Закупка</div>
+          <p class="muted small" id="tender-sub"></p>
+        </div>
+        <button class="btn btn-ghost btn-icon" id="tender-close" type="button" aria-label="Закрыть">✕</button>
+      </div>
+      <div id="tender-body"></div>
+    </div>
+  </div>
+
+  <!-- Модальное окно импорта Watchlist -->
+  <div class="modal-backdrop" id="modal-import" hidden>
+    <div class="modal-box">
+      <div class="card-title">Импорт номенклатуры</div>
+      <p class="muted small">Файл CSV, TXT, JSON или Excel (.xlsx). В таблице — колонки «Ключевые слова» и «ОКПД2». Без заголовка каждая строка считается отдельной позицией. Подойдёт UTF-8 и Windows-1251.</p>
+      <div class="file-row mt-sm">
+        <label class="btn btn-ghost">Выбрать файл
+          <input type="file" id="import-file" accept=".csv,.txt,.tsv,.json,.xlsx,text/csv,text/plain,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+        </label>
+        <span class="muted small" id="import-file-name">Файл не выбран</span>
+      </div>
+      <p class="muted small mt-sm">Или вставьте JSON:</p>
+      <textarea class="input" id="import-json-input" rows="6" placeholder='[{"keyword":"труба","okpd2":"24.20.13"}]'></textarea>
+      <label class="switch mt-sm"><input type="checkbox" id="import-replace" /> Заменить текущую номенклатуру</label>
+      <div class="form-row mt">
+        <button class="btn btn-primary" id="btn-import-confirm">Применить импорт</button>
+        <button class="btn btn-ghost" id="btn-import-close">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon"><svg><use href="#i-radar"/></svg></div>
+        <div>
+          <div class="brand-title">Tender <span>Spy</span></div>
+          <div class="brand-sub">Мониторинг закупок</div>
+        </div>
+        <span class="brand-live"><i></i>online</span>
+      </div>
+
+      <div class="nav-caption">Рабочее пространство</div>
+      <nav class="nav" aria-label="Основная навигация">
+        <button class="nav-item active" data-view="today"><span class="nav-icon"><svg><use href="#i-today"/></svg></span><span>Сегодня</span></button>
+        <button class="nav-item" data-view="feed"><span class="nav-icon"><svg><use href="#i-radar"/></svg></span><span>Лента</span><span class="nav-badge" id="badge-unseen" hidden>0</span></button>
+        <button class="nav-item" data-view="news"><span class="nav-icon"><svg><use href="#i-building"/></svg></span><span>Стройки</span></button>
+        <button class="nav-item" data-view="favorites"><span class="nav-icon"><svg><use href="#i-star"/></svg></span><span>Избранное</span><span class="nav-badge fav-badge" id="badge-fav" hidden>0</span></button>
+        <button class="nav-item" data-view="crm"><span class="nav-icon"><svg><use href="#i-board"/></svg></span><span>Воронка</span><span class="nav-badge crm-badge" id="badge-crm" hidden>0</span></button>
+        <button class="nav-item" data-view="watchlist"><span class="nav-icon"><svg><use href="#i-target"/></svg></span><span>Наблюдение</span></button>
+      </nav>
+
+      <div class="nav-caption">Управление</div>
+      <nav class="nav" aria-label="Управление и отчёты">
+        <button class="nav-item" data-view="analytics"><span class="nav-icon"><svg><use href="#i-chart"/></svg></span><span>Аналитика</span></button>
+        <button class="nav-item" data-view="settings"><span class="nav-icon"><svg><use href="#i-settings"/></svg></span><span>Настройки</span></button>
+        <button class="nav-item admin-only" data-view="users"><span class="nav-icon"><svg><use href="#i-users"/></svg></span><span>Пользователи</span></button>
+        <button class="nav-item" data-view="log"><span class="nav-icon"><svg><use href="#i-log"/></svg></span><span>Журнал опросов</span></button>
+      </nav>
+
+      <div class="side-card">
+        <div class="side-card-title">Статус</div>
+        <div class="status-row"><span>Режим</span><b id="st-mode">—</b></div>
+        <div class="status-row"><span>Последний опрос</span><b id="st-last">—</b></div>
+        <div class="status-row"><span>Следующий</span><b id="st-next">—</b></div>
+        <div class="status-row"><span>Telegram</span><b id="st-tg">—</b></div>
+        <button class="btn btn-primary btn-block admin-only" id="btn-scan"><svg><use href="#i-scan"/></svg> Опросить сейчас</button>
+        <div class="scan-progress" id="scan-progress" hidden><span class="spinner"></span> Запросы к ЕИС…</div>
+      </div>
+
+      <div class="side-card" id="account-card">
+        <div class="side-card-title">Учётная запись</div>
+        <div class="status-row"><span id="acc-name">—</span><b id="acc-role">—</b></div>
+        <button class="btn btn-ghost btn-block" id="btn-logout" type="button"><svg><use href="#i-logout"/></svg> Выйти</button>
+      </div>
+
+      <div class="side-card stats">
+        <div class="stat"><b id="s-open">0</b><span>открытых</span></div>
+        <div class="stat"><b id="s-unseen">0</b><span>новых</span></div>
+        <div class="stat"><b id="s-contracts">0</b><span>контрактов</span></div>
+        <div class="stat"><b id="s-fav">0</b><span>избранных</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="view" id="view-today">
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Рабочий день</div><h1>Сегодня</h1>
+            <p class="muted" id="today-summary">Что требует внимания: сроки, новые возможности и задачи команды</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" type="button" data-goto="feed">Открыть ленту</button>
+            <button class="btn btn-ghost" type="button" data-goto="crm">Открыть воронку</button>
+          </div>
+        </header>
+
+        <div class="grid-4 mb">
+          <div class="stat-card dashboard-stat"><div class="stat-title">Срок в ближайшие 3 дня</div><div class="stat-big" id="today-urgent-count">0</div><div class="stat-sub">открытых закупок</div></div>
+          <div class="stat-card dashboard-stat"><div class="stat-title">Новые возможности</div><div class="stat-big" id="today-best-count">0</div><div class="stat-sub">непрочитанных закупок</div></div>
+          <div class="stat-card dashboard-stat"><div class="stat-title">Задачи к сроку</div><div class="stat-big" id="today-task-count">0</div><div class="stat-sub">по открытым сделкам</div></div>
+          <div class="stat-card dashboard-stat"><div class="stat-title">Без ответственного</div><div class="stat-big" id="today-unassigned-count">0</div><div class="stat-sub">сделок в воронке</div></div>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="card dashboard-card">
+            <div class="card-title">Срочные сроки</div>
+            <div class="dashboard-list" id="today-urgent"></div>
+          </div>
+          <div class="card dashboard-card">
+            <div class="card-title">Лучшие новые закупки</div>
+            <div class="dashboard-list" id="today-best"></div>
+          </div>
+          <div class="card dashboard-card">
+            <div class="card-title">Задачи команды</div>
+            <div class="dashboard-list" id="today-tasks"></div>
+          </div>
+          <div class="card dashboard-card">
+            <div class="card-title">Требуют назначения</div>
+            <div class="dashboard-list" id="today-unassigned"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-news" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Перспективные объекты</div><h1>Стройки и проекты</h1>
+            <p class="muted" id="news-summary">Новости о предстоящих стройках по номенклатуре</p>
+          </div>
+          <div class="head-actions">
+            <a class="btn btn-ghost" id="news-search" href="#" target="_blank" rel="noopener" hidden>Открыть ленту новостей</a>
+          </div>
+        </header>
+        <div class="card">
+          <p class="muted small">Раздел собирается по ключевым словам номенклатуры из «Наблюдения» и обновляется кнопкой «Опросить сейчас». Ищутся стройки, реконструкция и капитальный ремонт.</p>
+          <div id="news-list" class="mt-sm"></div>
+        </div>
+      </section>
+
+      <!-- ЛЕНТА -->
+      <section class="view" id="view-feed" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Оперативный мониторинг</div><h1>Лента закупок</h1>
+            <p class="muted" id="feed-summary">Закупки, попавшие под вашу номенклатуру</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost admin-only" id="btn-mark-seen"><svg><use href="#i-check"/></svg> Всё прочитано</button>
+            <button class="btn btn-ghost admin-only" id="btn-archive-old" title="Просмотренные и закрытые закупки уйдут в архив. Избранные и новые открытые останутся"><svg><use href="#i-clean"/></svg> Очистить старые</button>
+            <a class="btn btn-ghost" id="btn-csv" href="/api/tenders.csv" download><svg><use href="#i-download"/></svg> CSV</a>
+          </div>
+        </header>
+
+        <div class="filters filters-primary">
+          <input class="input" id="f-q" type="search" placeholder="Поиск: слово, номер, заказчик…" />
+          <select class="input" id="f-nomen"><option value="">Вся номенклатура</option></select>
+          <select class="input" id="f-kind">
+            <option value="all">Извещения и контракты</option>
+            <option value="notice">Только извещения</option>
+            <option value="contract">Только контракты</option>
+          </select>
+          <select class="input" id="f-law">
+            <option value="all">44-ФЗ + 223-ФЗ</option>
+            <option value="44">44-ФЗ</option>
+            <option value="223">223-ФЗ</option>
+            <option value="615">615-ПП</option>
+          </select>
+          <select class="input" id="f-source"><option value="all">Все площадки</option></select>
+          <input class="input price-input" id="f-min" inputmode="decimal" placeholder="Цена от, ₽" autocomplete="off" />
+          <input class="input price-input" id="f-max" inputmode="decimal" placeholder="Цена до, ₽" autocomplete="off" />
+          <select class="input" id="f-sort">
+            <option value="fresh">Сначала новые в ленте</option>
+            <option value="published">По дате размещения</option>
+            <option value="deadline">По сроку подачи</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="price_asc">Цена ↑</option>
+          </select>
+          <label class="chip"><input type="checkbox" id="f-new" /> только новые</label>
+          <label class="chip"><input type="checkbox" id="f-open" checked /> только открытые</label>
+          <label class="chip"><input type="checkbox" id="f-fav" /> ★ избранные</label>
+          <label class="chip"><input type="checkbox" id="f-arch" /> архив</label>
+        </div>
+        <div class="filters filters-secondary">
+          <select class="input" id="f-region"><option value="">Все регионы</option></select>
+          <select class="input" id="f-subject">
+            <option value="">Поставка и работы</option>
+            <option value="supply">Только поставка</option>
+            <option value="works">Только работы и услуги</option>
+          </select>
+          <select class="input" id="f-ctype"><option value="">Любой заказчик</option></select>
+          <select class="input" id="f-method"><option value="">Любой способ</option></select>
+          <select class="input" id="f-smp">
+            <option value="">СМП: все</option>
+            <option value="exclude">Без ограничения «только СМП»</option>
+            <option value="only">Только для СМП</option>
+          </select>
+          <select class="input" id="f-published">
+            <option value="">Размещено: когда угодно</option>
+            <option value="1">за сутки</option>
+            <option value="3">за 3 дня</option>
+            <option value="7">за неделю</option>
+            <option value="30">за месяц</option>
+          </select>
+          <input class="input days-input" id="f-mindays" type="number" min="0" max="90" placeholder="Осталось дней, от" title="Срок подачи не раньше чем через N дней. Закупки, у которых срок ещё не известен, показываются" />
+          <label class="chip" title="Скрыть закупки по удалённым позициям номенклатуры, по выключенным законам, с ценой вне диапазона, с минус-словами и без уточняющих слов"><input type="checkbox" id="f-actual" checked /> по текущим настройкам</label>
+        </div>
+
+        <div class="list" id="feed-list"></div>
+        <div class="empty" id="feed-empty" hidden>
+          <div class="empty-icon">🔍</div>
+          <h3>Пока пусто</h3>
+          <p>Добавьте номенклатуру в разделе «Наблюдение», затем нажмите «Опросить сейчас».</p>
+        </div>
+      </section>
+
+      <!-- ИЗБРАННОЕ -->
+      <section class="view" id="view-favorites" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Отобранные возможности</div><h1>Избранное</h1>
+            <p class="muted" id="fav-summary">Закупки, отобранные для дальнейшего рассмотрения</p>
+          </div>
+          <div class="head-actions">
+            <a class="btn btn-ghost" id="btn-fav-csv" href="/api/tenders.csv?favorite=1&amp;archived=any&amp;sort=favorited" download><svg><use href="#i-download"/></svg> CSV</a>
+          </div>
+        </header>
+
+        <div class="filters">
+          <input class="input" id="fv-q" type="search" placeholder="Поиск по избранному и заметкам…" />
+          <select class="input" id="fv-sort">
+            <option value="favorited">Сначала добавленные недавно</option>
+            <option value="deadline">По сроку подачи</option>
+            <option value="price_desc">Цена ↓</option>
+            <option value="price_asc">Цена ↑</option>
+          </select>
+          <label class="chip"><input type="checkbox" id="fv-open" /> только открытые</label>
+        </div>
+
+        <div class="deadline-banner" id="fav-deadlines" hidden></div>
+        <div class="list" id="fav-list"></div>
+        <div class="empty" id="fav-empty" hidden>
+          <div class="empty-icon">⭐</div>
+          <h3>В избранном пока пусто</h3>
+          <p>В ленте нажмите «☆ В избранное» на карточке закупки — она появится здесь вместе с полем для заметок.</p>
+        </div>
+      </section>
+
+      <!-- ВОРОНКА -->
+      <section class="view" id="view-crm" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Работа команды</div><h1>Воронка участия</h1>
+            <p class="muted">Закупки, которые команда ведёт до заявки: отбор, изучение, подготовка, подача, итог</p>
+          </div>
+          <div class="head-actions">
+            <label class="chip"><input type="checkbox" id="crm-mine" /> только мои</label>
+          </div>
+        </header>
+        <div class="kanban" id="crm-board"></div>
+        <div class="empty" id="crm-empty" hidden>
+          <div class="empty-icon">📋</div>
+          <h3>В воронке пока пусто</h3>
+          <p>В ленте или в избранном нажмите «В воронку» на закупке, которую решили рассматривать.</p>
+        </div>
+      </section>
+
+      <!-- НАБЛЮДЕНИЕ -->
+      <section class="view" id="view-watchlist" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Настройка поиска</div><h1>Список наблюдения</h1>
+            <p class="muted">Что искать в ЕИС и на площадках: ключевые слова и коды ОКПД2</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost admin-only" id="btn-export-wl"><svg><use href="#i-download"/></svg> Экспорт JSON</button>
+            <button class="btn btn-ghost admin-only" id="btn-import-wl"><svg><use href="#i-download"/></svg> Импорт файла</button>
+          </div>
+        </header>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Номенклатура</div>
+            <form class="form admin-only" id="form-nomen">
+              <div class="form-row">
+                <div class="field grow-2">
+                  <label>Ключевые слова <span class="hint">как в поиске ЕИС</span></label>
+                  <input class="input" name="keyword" placeholder="труба предизолированная" />
+                </div>
+                <div class="field grow">
+                  <label>ОКПД2 <span class="hint">необязательно</span></label>
+                  <input class="input" name="okpd2" placeholder="24.20.13" />
+                </div>
+              </div>
+              <div class="field">
+                <label>Уточняющие слова <span class="hint">необязательно; в названии закупки должно быть хотя бы одно, через запятую</span></label>
+                <input class="input" name="context" placeholder="труб, изоляц, скорлуп, отвод, фасон" />
+              </div>
+              <button class="btn btn-primary" type="submit">＋ Добавить позицию</button>
+            </form>
+            <div class="items" id="nomen-list"></div>
+            <details class="details">
+              <summary>Какие запросы уйдут в ЕИС и на площадки</summary>
+              <div id="queries-preview" class="queries"></div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- АНАЛИТИКА -->
+      <section class="view" id="view-analytics" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Рынок и контрагенты</div><h1>Аналитика выборки</h1>
+            <p class="muted">Суммы НМЦК, распределение по законам, этапам и топ контрагентов</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn btn-ghost" id="btn-refresh-analytics"><svg><use href="#i-scan"/></svg> Обновить</button>
+          </div>
+        </header>
+
+        <div class="grid-4 mb">
+          <div class="stat-card">
+            <div class="stat-title">Общая сумма НМЦК / контрактов</div>
+            <div class="stat-big" id="an-total-price">0 ₽</div>
+            <div class="stat-sub" id="an-count">0 активных позиций</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Средний чек закупки</div>
+            <div class="stat-big" id="an-avg-price">0 ₽</div>
+            <div class="stat-sub">по закупкам с указанной ценой</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Максимальная закупка</div>
+            <div class="stat-big" id="an-max-price">0 ₽</div>
+            <div class="stat-sub">самый крупный лот</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-title">Доля 44-ФЗ / 223-ФЗ</div>
+            <div class="stat-big" id="an-laws-ratio">—</div>
+            <div class="stat-sub" id="an-laws-sub">распределение бюджета</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Распределение по законам и типам</div>
+            <table class="table" id="an-laws-table">
+              <thead><tr><th>Категория</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+
+            <div class="card-title mt">Распределение по этапам</div>
+            <table class="table" id="an-stages-table">
+              <thead><tr><th>Этап</th><th>Кол-во</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Топ-10 заказчиков (по объёму НМЦК)</div>
+            <table class="table" id="an-customers-table">
+              <thead><tr><th>Заказчик</th><th>Лотов</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+
+            <div class="card-title mt">Топ-10 поставщиков (по выигранным контрактам)</div>
+            <table class="table" id="an-suppliers-table">
+              <thead><tr><th>Поставщик</th><th>Контрактов</th><th>Сумма</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- НАСТРОЙКИ -->
+      <section class="view" id="view-settings" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Система и уведомления</div><h1>Настройки</h1>
+            <p class="muted">Периодичность опроса, законы, уведомления</p>
+          </div>
+        </header>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Опрос</div>
+            <div class="field">
+              <label>Интервал автоопроса, минут</label>
+              <input class="input" id="set-interval" type="number" min="1" max="1440" />
+            </div>
+            <label class="switch"><input type="checkbox" id="set-onlyopen" /> Только закупки на этапе подачи заявок</label>
+            <div class="card-title mt">Цена закупки (НМЦК)</div>
+            <p class="muted small">Уходит в запрос к ЕИС и к площадкам, где есть такой фильтр; у остальных лишнее отсекается по цене карточки. Закупки без указанной цены не отбрасываются. Пусто — без ограничения.</p>
+            <div class="form-row">
+              <div class="field grow">
+                <label>от, ₽</label>
+                <input class="input" id="set-price-min" inputmode="decimal" placeholder="100 000" autocomplete="off" />
+              </div>
+              <div class="field grow">
+                <label>до, ₽</label>
+                <input class="input" id="set-price-max" inputmode="decimal" placeholder="5 000 000" autocomplete="off" />
+              </div>
+            </div>
+            <div class="card-title mt">Минус-слова</div>
+            <p class="muted small">Закупки, в названии которых есть такое слово, не попадают в ленту. Фраза отсекает, только если в названии есть все её слова. Через запятую или с новой строки.</p>
+            <textarea class="input" id="set-minus" rows="4" placeholder="запасные части, лекарственный препарат"></textarea>
+            <div class="card-title mt">Законы</div>
+            <label class="switch"><input type="checkbox" id="set-fz44" /> 44-ФЗ (госзакупки)</label>
+            <label class="switch"><input type="checkbox" id="set-fz223" /> 223-ФЗ (госкомпании, естественные монополии)</label>
+            <label class="switch"><input type="checkbox" id="set-fz615" /> 615-ПП (капремонт МКД)</label>
+            <div class="card-title mt">Площадки</div>
+            <p class="muted small">ЕИС опрашивается всегда. Здесь — дополнительные открытые площадки, поиск по ключевым словам номенклатуры (позиции только с ОКПД2 на площадки не уходят).</p>
+            <div id="set-platforms"></div>
+            <button class="btn btn-primary mt admin-only" id="btn-save-settings">💾 Сохранить</button>
+          </div>
+          <div class="card">
+            <div class="card-title">Уведомления</div>
+            <label class="switch"><input type="checkbox" id="set-browser" /> Уведомления браузера о новых закупках</label>
+            <label class="switch"><input type="checkbox" id="set-telegram" /> Отправлять в Telegram <span class="hint" id="tg-hint"></span></label>
+            <div class="form-row mt-sm admin-only" id="tg-test-row">
+              <button class="btn btn-ghost btn-sm" id="btn-test-tg">Тест Telegram</button>
+            </div>
+            <p class="muted small">Для Telegram задайте переменные окружения <code>TELEGRAM_BOT_TOKEN</code> и <code>TELEGRAM_CHAT_ID</code> при запуске сервера.</p>
+            <div class="card-title mt">Источник данных и прокси</div>
+            <p class="muted small" id="source-note"></p>
+            <p class="muted small">Поддержка исходящего прокси (HTTP/HTTPS/SOCKS5): задайте <code>HTTPS_PROXY=http://user:pass@host:port</code> при запуске.</p>
+          </div>
+        </div>
+
+        <div class="card mt" id="password-card">
+          <div class="card-title">Мой пароль</div>
+          <form class="form" id="form-password">
+            <div class="form-row">
+              <div class="field grow">
+                <label>Текущий пароль</label>
+                <input class="input" name="current" type="password" autocomplete="current-password" required />
+              </div>
+              <div class="field grow">
+                <label>Новый пароль <span class="hint">от 8 символов</span></label>
+                <input class="input" name="next" type="password" autocomplete="new-password" required />
+              </div>
+            </div>
+            <button class="btn btn-primary" type="submit">Сменить пароль</button>
+          </form>
+        </div>
+      </section>
+
+      <section class="view admin-only" id="view-users" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">Доступ команды</div><h1>Пользователи</h1>
+            <p class="muted">Администратор добавляет сотрудников и других администраторов</p>
+          </div>
+        </header>
+        <div class="card" id="users-card">
+          <div class="card-title">Новая учётная запись</div>
+          <p class="muted small">Сотрудник смотрит ленту и аналитику, ведёт избранное и заметки, извлекает документы. Администратор дополнительно меняет номенклатуру, настройки, опрос и учётные записи.</p>
+          <form class="form" id="form-user">
+            <div class="form-row">
+              <div class="field grow">
+                <label>Логин <span class="hint">латиница, от 3 символов</span></label>
+                <input class="input" name="login" required autocomplete="off" placeholder="ivanova" maxlength="32" />
+              </div>
+              <div class="field grow">
+                <label>Имя</label>
+                <input class="input" name="name" placeholder="Иванова А.С." maxlength="80" />
+              </div>
+              <div class="field grow">
+                <label>Пароль <span class="hint">от 8 символов</span></label>
+                <input class="input" name="password" type="password" required minlength="8" autocomplete="new-password" />
+              </div>
+              <div class="field">
+                <label>Роль</label>
+                <select class="input" name="role">
+                  <option value="employee">Сотрудник</option>
+                  <option value="admin">Администратор</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-primary" type="submit">Добавить пользователя</button>
+          </form>
+          <div class="card-title mt">Кто уже есть</div>
+          <div class="items" id="users-list"></div>
+        </div>
+      </section>
+
+      <!-- ЖУРНАЛ -->
+      <section class="view" id="view-log" hidden>
+        <header class="view-head">
+          <div>
+            <div class="eyebrow">История и диагностика</div><h1>Журнал опросов</h1>
+            <p class="muted">Что и когда запрашивалось, сколько найдено, ошибки</p>
+          </div>
+        </header>
+        <div class="card">
+          <table class="table" id="runs-table">
+            <thead><tr><th>Начало</th><th>Триггер</th><th>Запросов</th><th>Найдено</th><th>Новых</th><th>Ошибки</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
