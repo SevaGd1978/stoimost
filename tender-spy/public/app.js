@@ -246,11 +246,11 @@
               ? `<div class="tender-note"><textarea class="input note-input" rows="2" maxlength="2000" placeholder="Заметка: что уточнить, решение, контакты заказчика…">${esc(t.comment || '')}</textarea><span class="note-status"></span></div>
                  <div class="tender-docs" data-docs>${renderDocs(t)}</div>
                  ${customerTools(t)}`
-              : `${t.comment ? `<div class="tender-note-view" title="Заметка из «Избранного»">📝 ${esc(t.comment)}</div>` : ''}${t.favorite ? customerTools(t) : ''}`
+              : `${t.comment ? `<div class="tender-note-view" title="Заметка из «Избранного»">Заметка: ${esc(t.comment)}</div>` : ''}${t.favorite ? customerTools(t) : ''}`
           }
           ${
             !inFavorites && t.documents?.state === 'done'
-              ? `<div class="tender-note-view"><a href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">📑 Документы в PDF · ${t.documents.pages} стр.</a></div>`
+              ? `<div class="tender-note-view"><a href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">Документы в PDF · ${t.documents.pages} стр.</a></div>`
               : ''
           }
         </div>
@@ -258,7 +258,7 @@
           <div class="price">${fmtPrice(t.price)} <small>₽</small></div>
           <div class="deadline ${dlClass}">${esc(dlText)}</div>
           <div class="tender-actions">
-            <button class="btn btn-sm" data-act="crm" title="Вести закупку в воронке участия">${t.crmStage ? '📋 В воронке' : '📋 В воронку'}</button>
+            <button class="btn btn-sm" data-act="crm" title="Вести закупку в воронке участия">${t.crmStage ? 'В воронке' : 'В воронку'}</button>
             <button class="btn btn-sm fav ${t.favorite ? 'active' : ''}" data-act="favorite" title="${t.favorite ? 'Убрать из избранного' : 'Отложить для дальнейшего рассмотрения'}">${t.favorite ? '★ В избранном' : '☆ В избранное'}</button>
             <button class="btn btn-sm btn-icon" data-act="seen" title="${t.seen ? 'Отметить как новое' : 'Прочитано'}">${t.seen ? '↺' : '✓'}</button>
             ${isAdmin() ? `<button class="btn btn-sm btn-icon" data-act="archive" title="${t.archived ? 'Вернуть из архива' : 'В архив'}">${t.archived ? '📤' : '🗄️'}</button>` : ''}
@@ -273,12 +273,12 @@
     const title = byInn
       ? 'Карточка заказчика на Saby: надёжность, выручка, долги, суды и исполнительные производства'
       : 'Поиск заказчика на Чекко: ИНН в карточке ещё нет';
-    return `<a class="btn btn-sm" href="${esc(t.legalCheckUrl)}" target="_blank" rel="noopener" title="${esc(title)}">⚖ Юридическая проверка</a>`;
+    return `<a class="btn btn-sm" href="${esc(t.legalCheckUrl)}" target="_blank" rel="noopener" title="${esc(title)}">Юридическая проверка</a>`;
   }
 
   function volumeButton(t) {
     if (!t.customer && !t.customerInn) return '';
-    return `<button type="button" class="btn btn-sm" data-act="volume" title="Бесплатный реестр контрактов ЕИС и закупки этого заказчика, уже найденные Tender Spy">📊 Объём закупок</button>`;
+    return `<button type="button" class="btn btn-sm" data-act="volume" title="Бесплатный реестр контрактов ЕИС и закупки этого заказчика, уже найденные Tender Spy">Объём закупок</button>`;
   }
 
   function customerTools(t) {
@@ -299,17 +299,17 @@
       `<button class="btn btn-sm" data-act="docs" title="Скачать документацию закупки из ЕИС и собрать её в один PDF">${label}</button>`;
     if (d?.state === 'done') {
       return `
-        <a class="btn btn-sm btn-primary" href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">📑 Открыть PDF · ${d.pages} стр.</a>
-        ${extract('🔄 Обновить')}
+        <a class="btn btn-sm btn-primary" href="${docsUrl(t, '.pdf')}" target="_blank" rel="noopener">Открыть PDF · ${d.pages} стр.</a>
+        ${extract('Обновить')}
         <button class="btn btn-sm btn-ghost" data-act="docs-list">Состав: ${d.files} док.${d.skipped ? `, пропущено ${d.skipped}` : ''}</button>
         <span class="muted docs-at">${fmtDateTime(d.at)}</span>
         ${d.lastError ? `<span class="docs-error">Обновить не удалось (${esc(fmtDateTime(d.lastErrorAt))}): ${esc(d.lastError)}. Показан прошлый PDF.</span>` : ''}
         <div class="docs-list" hidden></div>`;
     }
     if (d?.state === 'error') {
-      return `${extract('📄 Извлечь документы')}<span class="docs-error">${esc(d.error || 'Не удалось извлечь документы')}</span>`;
+      return `${extract('Извлечь документы')}<span class="docs-error">${esc(d.error || 'Не удалось извлечь документы')}</span>`;
     }
-    return extract('📄 Извлечь документы');
+    return extract('Извлечь документы');
   }
 
   const DOC_STATUS = { ok: '✓', truncated: '✂️', skipped: '—', error: '⚠️' };
@@ -412,8 +412,8 @@
         const bh = s.sum > 0 ? Math.max(4, (s.sum / max) * plotH) : 2;
         const x = x0 + i * (barW + gap);
         const y = padT + (plotH - bh);
-        const sum = showSum ? `<text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" fill="#e6ecff" font-size="11">${esc(fmtCompact(s.sum))}</text>` : '';
-        return `<g><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="4" fill="${s.sum ? '#5ee1a8' : '#24325c'}"></rect>${sum}<text x="${(x + barW / 2).toFixed(1)}" y="${h - 8}" text-anchor="middle" fill="#8b97bf" font-size="12">${s.year}</text></g>`;
+        const sum = showSum ? `<text x="${x + barW / 2}" y="${Math.max(12, y - 6)}" text-anchor="middle" fill="#33463f" font-size="11" font-weight="650">${esc(fmtCompact(s.sum))}</text>` : '';
+        return `<g><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="5" fill="${s.sum ? '#18a67c' : '#dce6e1'}"></rect>${sum}<text x="${(x + barW / 2).toFixed(1)}" y="${h - 8}" text-anchor="middle" fill="#718078" font-size="12">${s.year}</text></g>`;
       })
       .join('');
     return `<svg class="volume-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Объём закупок по годам">${bars}</svg>`;
